@@ -13,15 +13,14 @@ use super::storage_error;
 use crate::HostConfig;
 use akasha::orihon_folder::{Completion, Engine, Task, model::FolderConfig};
 use futures_util::FutureExt;
-use hearth::orihon::live::{LIVE_INSTRUCTIONS, LIVE_VERSION, compress_task, merge_task};
+use hearth::orihon::live::{LIVE_INSTRUCTIONS, LIVE_VERSION, compress_task};
 use hearth::orihon::{FolderBackend, FolderSettings, Kind, MAX_BATCH_RECORDS, Record};
 use origami::orihon::Error;
 use origami::orihon::live::store::{
     self, Job, Live, LiveConfig, Outcome, Prefix, SessionRecord, Snapshot, Store,
 };
 use origami::orihon::live::{
-    self as tree, LEAF_WINDOW, LINE_BYTES, MAX_JOBS, MODEL_LINE_CEILING, Method, NodeKey, Rendered,
-    View,
+    self as tree, LEAF_WINDOW, MAX_JOBS, MODEL_LINE_CEILING, Method, NodeKey, Rendered, View,
 };
 use protocol::ProtocolErrorBody;
 use serde_json::{Value, json};
@@ -83,6 +82,9 @@ enum Command {
 pub(crate) struct TurnRequest {
     pub session: String,
     pub through_source_id: Option<String>,
+    /// The first room record of this session's current generation, inclusive. Older records
+    /// stay in the view; a turn neither names one nor counts one as its new input.
+    pub generation_start_seq: i64,
     pub prefix: Prefix,
     pub model: TurnModel,
     /// The session's own fold folder; it configures a room that has none.
@@ -709,10 +711,6 @@ struct Owner {
     dirty: bool,
     /// Unbuilt leaves. The first `LEAF_WINDOW` of them may start.
     pending: BTreeSet<u64>,
-    /// Ready parents whose halves fit one line together.
-    joins: Vec<NodeKey>,
-    /// Ready parents for the model, oldest end first.
-    merges: BTreeSet<(u64, NodeKey)>,
     running: HashSet<NodeKey>,
     /// Failed nodes wait for a boundary or the idle retry deadline.
     failed: HashSet<NodeKey>,
@@ -728,8 +726,7 @@ struct Owner {
 }
 
 impl Owner {
-    /// Restores exactly what was persisted. Views are never rebuilt; ready parents are found
-    /// once here from the built nodes.
+    /// Restore the saved window. The archive retains originals outside it.
     fn restore(live: Live, snapshot: Snapshot) -> Result<Self, String> {
         let chat = snapshot.chat.unwrap_or_default();
         let compactor = snapshot.compactor.unwrap_or_default();
@@ -740,7 +737,7 @@ impl Owner {
         let pending = (0..snapshot.units)
             .filter(|unit| !sizes.contains_key(&NodeKey::leaf(*unit)))
             .collect();
-        let mut owner = Self {
+        let owner = Self {
             live,
             config: snapshot.config,
             units: snapshot.units,
@@ -750,8 +747,6 @@ impl Owner {
             compactor,
             dirty: false,
             pending,
-            joins: Vec::new(),
-            merges: BTreeSet::new(),
             running: HashSet::new(),
             failed: HashSet::new(),
             unsaved: Vec::new(),
@@ -762,15 +757,6 @@ impl Owner {
             note: None,
             waiters: Vec::new(),
         };
-        let lefts: Vec<NodeKey> = owner
-            .sizes
-            .keys()
-            .filter(|key| key.index % 2 == 0)
-            .copied()
-            .collect();
-        for key in lefts {
-            owner.ready_parent(key);
-        }
         Ok(owner)
     }
 
@@ -787,7 +773,7 @@ impl Owner {
             .saturating_sub(leaves(&self.running) + leaves(&self.failed) + held);
         json!({"units":self.units,"leavesBuilt":self.units - self.pending.len() as u64,
             "running":self.running.len(),"failed":self.failed.len(),
-            "queued":waiting + self.joins.len() + self.merges.len(),
+            "queued":waiting,
             "chatBytes":self.chat.bytes(&self.sizes),"chatLines":self.chat.lines.len(),
             "batch":if self.chat.merging { "merging" } else { "growing" },
             "compactorBytes":self.compactor.bytes(&self.sizes),
@@ -820,12 +806,7 @@ impl Owner {
         self.engine_blocked = false;
         self.stalled = false;
         self.save_unsaved().await?;
-
-        for key in std::mem::take(&mut self.failed) {
-            if key.level > 0 {
-                self.merges.insert((key.end(), key));
-            }
-        }
+        self.failed.clear();
 
         Ok(())
     }
@@ -863,9 +844,15 @@ impl Owner {
 
     /// Apply built nodes to both views and persist them before more work reads their context.
     async fn maintain_views(&mut self) -> Result<(), Error> {
-        if tree::maintain(&mut self.chat, &mut self.compactor, self.units, &self.sizes).changed() {
-            self.dirty = true;
-        }
+        self.dirty |= self
+            .chat
+            .roll(self.units, tree::CHAT_HIGH, tree::CHAT_LOW, &self.sizes);
+        self.dirty |= self.compactor.roll(
+            self.units,
+            tree::COMPACTOR_HIGH,
+            tree::COMPACTOR_LOW,
+            &self.sizes,
+        );
         if self.dirty {
             self.live.save_views(&self.chat, &self.compactor).await?;
             self.dirty = false;
@@ -939,9 +926,7 @@ impl Owner {
             self.config = config;
         }
         self.boundary(hints).await.map_err(storage_error)?;
-        let frontier = self
-            .frontier(&request.session, request.through_source_id.as_deref())
-            .await?;
+        let frontier = self.frontier(request).await?;
         if frontier > self.ingested_seq {
             // Another session's capture landed after this boundary's ingest.
             self.boundary(Vec::new()).await.map_err(storage_error)?;
@@ -968,43 +953,29 @@ impl Owner {
         })
     }
 
-    /// The last record of the room that a turn's view covers. Records of this session after
-    /// it may only be one new user input and the records it parents.
-    async fn frontier(
-        &mut self,
-        session: &str,
-        through: Option<&str>,
-    ) -> Result<i64, ProtocolErrorBody> {
-        let frontier = match through {
-            Some(source_id) => self
-                .live
-                .source_seq(HARNESS, session, source_id)
-                .await
-                .map_err(storage_error)?
-                .ok_or_else(|| {
-                    refusal(
-                        "orihon_boundary_missing",
-                        "throughSourceId is not an accepted record of this session",
-                    )
-                })?,
-            None => match self
-                .live
-                .session_first(HARNESS, session)
-                .await
-                .map_err(storage_error)?
-            {
-                Some(first) => first - 1,
-                None => self
-                    .live
-                    .last_seq()
-                    .await
-                    .map_err(storage_error)?
-                    .unwrap_or(-1),
-            },
+    /// The last record of the room that a turn's view covers. A named source is an accepted
+    /// record of the session's current generation. Without one, no accepted source of the
+    /// session precedes the turn in this generation: the view stops before the session's first
+    /// record of the generation, or at the ingested prefix when it has none. Records of this
+    /// session after the frontier may only be one new user input and the records it parents.
+    async fn frontier(&self, request: &TurnRequest) -> Result<i64, ProtocolErrorBody> {
+        let session = request.session.as_str();
+        let start = request.generation_start_seq;
+        let named = match request.through_source_id.as_deref() {
+            Some(source_id) => Some(
+                self.generation_source_seq(session, source_id, start)
+                    .await?,
+            ),
+            None => None,
         };
         let after = self
             .live
-            .session_after(HARNESS, session, frontier, SESSION_TAIL + 1)
+            .session_after(
+                HARNESS,
+                session,
+                named.unwrap_or(start - 1),
+                SESSION_TAIL + 1,
+            )
             .await
             .map_err(storage_error)?;
         if after.len() > SESSION_TAIL || !one_user_input(&after) {
@@ -1013,7 +984,38 @@ impl Owner {
                 "this session holds records after the frontier beyond one new user input",
             ));
         }
-        Ok(frontier)
+        // The ingested prefix was stored before this lookup read the session, so a cut there
+        // passes no record of the session unchecked.
+        Ok(named.unwrap_or_else(|| {
+            after
+                .first()
+                .map_or(self.ingested_seq, |first| first.seq - 1)
+        }))
+    }
+
+    async fn generation_source_seq(
+        &self,
+        session: &str,
+        source_id: &str,
+        start: i64,
+    ) -> Result<i64, ProtocolErrorBody> {
+        let seq = self
+            .live
+            .source_seq(HARNESS, session, source_id)
+            .await
+            .map_err(storage_error)?;
+
+        match seq {
+            None => Err(refusal(
+                "orihon_boundary_missing",
+                "throughSourceId is not an accepted record of this session",
+            )),
+            Some(seq) if seq < start => Err(refusal(
+                "orihon_boundary_stale",
+                "throughSourceId precedes this session's current generation",
+            )),
+            Some(seq) => Ok(seq),
+        }
     }
 
     /// Answers every waiting turn whose frontier cut is wholly built.
@@ -1138,13 +1140,12 @@ impl Owner {
         !self.running.contains(&key) && !self.failed.contains(&key) && !self.held(key)
     }
 
-    /// Prioritize merges; keep one leaf slot when its context fits the compactor budget.
+    /// Start ready message summaries, oldest first.
     async fn dispatch(
         &mut self,
         jobs: &mut JoinSet<Finished>,
         cancel: &CancellationToken,
     ) -> Result<(), Error> {
-        self.drain_joins().await?;
         self.maintain_views().await?;
         let Some(engine) = self.current_engine() else {
             return Ok(());
@@ -1156,19 +1157,6 @@ impl Owner {
                 .take(LEAF_WINDOW)
                 .copied()
                 .find(|unit| self.idle(NodeKey::leaf(*unit)));
-            // One bounded leaf can progress even when new merges keep arriving.
-            let leaf_slot = self.running.len() == MAX_JOBS - 1
-                && !self.running.iter().any(|key| key.level == 0)
-                && next.is_some_and(|unit| self.context_fits(unit));
-
-            if !leaf_slot && let Some(&(end, key)) = self.merges.first() {
-                self.merges.remove(&(end, key));
-                if let Err(error) = self.start_merge(jobs, &engine, cancel, key).await {
-                    self.failed.insert(key);
-                    return Err(error);
-                }
-                continue;
-            }
 
             let Some(unit) = next else {
                 break;
@@ -1179,7 +1167,6 @@ impl Owner {
             if tree::verbatim(&input).is_some() {
                 self.put(key, input, Method::Verbatim, source.unit.digest, None)
                     .await?;
-                self.drain_joins().await?;
                 self.maintain_views().await?;
                 continue;
             }
@@ -1196,83 +1183,6 @@ impl Owner {
             );
         }
         Ok(())
-    }
-
-    async fn start_merge(
-        &mut self,
-        jobs: &mut JoinSet<Finished>,
-        engine: &Engine,
-        cancel: &CancellationToken,
-        key: NodeKey,
-    ) -> Result<(), Error> {
-        let (left, right, left_text, right_text, source_digest) = self.halves(key).await?;
-        let prompt = merge_task(
-            &label(left),
-            &label(right),
-            key.first(),
-            key.last(),
-            &input_line(left, &left_text),
-            &input_line(right, &right_text),
-        );
-        let context = self.context(key.end()).await?;
-        self.spawn(jobs, engine, cancel, key, source_digest, context, prompt);
-        Ok(())
-    }
-
-    /// Both built halves of a parent with their texts and the parent's source digest.
-    async fn halves(
-        &mut self,
-        key: NodeKey,
-    ) -> Result<(NodeKey, NodeKey, String, String, String), Error> {
-        let [left, right] = key
-            .children()
-            .ok_or_else(|| Error::Invalid("a leaf has no halves".into()))?;
-        let mut texts = self.live.texts(&[left, right]).await?;
-        let (Some(left_text), Some(right_text)) = (texts.remove(&left), texts.remove(&right))
-        else {
-            return Err(Error::Invalid(
-                "a ready parent's half has no stored text".into(),
-            ));
-        };
-        let (Some(left_digest), Some(right_digest)) = (
-            self.live.node_digest(left).await?,
-            self.live.node_digest(right).await?,
-        ) else {
-            return Err(Error::Invalid(
-                "a ready parent's half has no stored digest".into(),
-            ));
-        };
-        Ok((
-            left,
-            right,
-            left_text,
-            right_text,
-            tree::branch_source_digest(&left_digest, &right_digest),
-        ))
-    }
-
-    async fn drain_joins(&mut self) -> Result<(), Error> {
-        while let Some(key) = self.joins.pop() {
-            if let Err(error) = self.join(key).await {
-                self.joins.push(key);
-                return Err(error);
-            }
-        }
-        Ok(())
-    }
-
-    async fn join(&mut self, key: NodeKey) -> Result<(), Error> {
-        let (_, _, left_text, right_text, source_digest) = self.halves(key).await?;
-        match tree::joined(&left_text, &right_text) {
-            Some(text) => {
-                self.put(key, text, Method::Joined, source_digest, None)
-                    .await
-            }
-            None => {
-                self.merges.insert((key.end(), key));
-                Ok(())
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1396,45 +1306,6 @@ impl Owner {
         if key.level == 0 {
             self.pending.remove(&key.index);
         }
-        self.ready_parent(key);
-    }
-
-    /// A node's parent is ready once both halves are built. Halves that fit one line
-    /// together join without a model.
-    fn ready_parent(&mut self, key: NodeKey) {
-        let Some(parent) = key.parent() else {
-            return;
-        };
-        let Some([left, right]) = parent.children() else {
-            return;
-        };
-        if self.sizes.contains_key(&parent) {
-            return;
-        }
-        let (Some(left), Some(right)) = (self.sizes.get(&left), self.sizes.get(&right)) else {
-            return;
-        };
-        if left + 1 + right <= LINE_BYTES {
-            self.joins.push(parent);
-        } else {
-            self.merges.insert((parent.end(), parent));
-        }
-    }
-
-    fn context_fits(&self, end: u64) -> bool {
-        let mut bytes = 0;
-        for key in self
-            .compactor
-            .lines
-            .iter()
-            .take_while(|key| key.end() <= end && self.sizes.contains_key(key))
-        {
-            bytes += tree::line_bytes(*key, self.sizes.get(key).copied());
-            if bytes > tree::COMPACTOR_HIGH {
-                return false;
-            }
-        }
-        true
     }
 
     /// The compactor view's built lines that end at or before `end`, rendered.
@@ -1463,18 +1334,6 @@ fn chat_json(revision: u64, units: u64, through_seq: Option<i64>, rendered: Rend
         "lines":rendered.lines,"blocks":rendered.blocks,"tail":rendered.tail})
 }
 
-fn label(key: NodeKey) -> String {
-    format!("{}+{}", key.first(), key.count())
-}
-
-/// A merge input line as the view shows it: `id+n|text`.
-fn input_line(key: NodeKey, text: &str) -> String {
-    let mut line = tree::render_line(key, Some(text));
-    // Every rendered line ends with its newline.
-    line.pop();
-    line
-}
-
 /// After the frontier a session may hold one user input, its parts consecutive and before
 /// any other record of the session, and only records parented by its first part.
 fn one_user_input(records: &[SessionRecord]) -> bool {
@@ -1486,20 +1345,19 @@ fn one_user_input(records: &[SessionRecord]) -> bool {
     let Some(first) = inputs.first() else {
         return rest.is_empty();
     };
-    if inputs.len() > 1 || part_of(&first.source_id).is_some() {
-        let Some((base, _, count)) = part_of(&first.source_id) else {
-            return false;
-        };
-        let numbered = inputs
+    let numbered = match part_of(&first.source_id) {
+        None => inputs.len() == 1,
+        Some((base, 1, count)) => inputs[1..]
             .iter()
             .enumerate()
-            .all(|(index, record)| part_of(&record.source_id) == Some((base, index + 1, count)));
-        if !numbered {
-            return false;
-        }
-    }
-    rest.iter()
-        .all(|record| record.parent_user_id.as_deref() == Some(first.source_id.as_str()))
+            .all(|(index, record)| part_of(&record.source_id) == Some((base, index + 2, count))),
+        Some(_) => false,
+    };
+
+    numbered
+        && rest
+            .iter()
+            .all(|record| record.parent_user_id.as_deref() == Some(first.source_id.as_str()))
 }
 
 /// `<entry>#part-<k>-of-<n>`, with 1 <= k <= n.

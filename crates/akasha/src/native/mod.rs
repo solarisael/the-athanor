@@ -1,6 +1,6 @@
 pub mod retention;
 use crate::insula_writer::{EmitterSpan, system_binding};
-use crate::migrations::{migration_pool, run_migrations};
+use crate::migrations::{migration_pool, run_migrations_with_starter_pages};
 use crate::{
     AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
     LessonContextParams, LessonDeleteParams, LessonQueryParams, LessonTriggerMatchParams,
@@ -546,7 +546,7 @@ pub async fn execute(
         let operation = operation_name(&request);
         return Ok(match Config::from_env() {
             Ok(config) => match migration_pool(&config).await {
-                Ok(pool) => match run_migrations(&pool).await {
+                Ok(pool) => match run_migrations_with_starter_pages(&pool).await {
                     Ok(result) => success_json(id, result)?,
                     Err(error) => app_error(id, operation, error),
                 },

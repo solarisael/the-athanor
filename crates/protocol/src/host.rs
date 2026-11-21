@@ -50,6 +50,7 @@ pub const ROUTING_PROJECTION_ID: &str = "routing";
 pub const ROUTING_STATUS: &str = "athanor.routing.status";
 pub const ROUTING_DISPATCH: &str = "athanor.routing.dispatch";
 pub const FAMILIAR_STATUS: &str = "athanor.familiar.status";
+pub const SPELLBOOK_WRITE: &str = "athanor.spellbook.write";
 pub const ROUTING_RESULT: &str = "athanor.routing.result";
 pub const LINEAGE_PROJECTION_ID: &str = "lineage";
 pub const LINEAGE_NORMALIZE: &str = "athanor.lineage.normalize";
@@ -606,8 +607,6 @@ struct RawClientCommand {
     #[serde(default)]
     routing_request: Option<Value>,
     #[serde(default)]
-    room_dir: Option<String>,
-    #[serde(default)]
     lineage_request: Option<QuestBatch>,
     #[serde(default)]
     lineage_lifecycle: Option<QuestLifecycle>,
@@ -911,7 +910,9 @@ impl RawClientCommand {
             PRESENCE_OPEN | PRESENCE_COMPILE | PRESENCE_SETTLE | PRESENCE_CLOSE => {
                 PRESENCE_PROJECTION_ID
             }
-            ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS => ROUTING_PROJECTION_ID,
+            ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS | SPELLBOOK_WRITE => {
+                ROUTING_PROJECTION_ID
+            }
             LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
             SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
                 SHELL_PROJECTION_ID
@@ -964,7 +965,6 @@ impl RawClientCommand {
             || self.failure_reason.is_some()
             || self.compaction_summary.is_some()
             || self.routing_request.is_some()
-            || self.room_dir.is_some()
             || self.context_request.is_some()
             || self.context_viewport_mode.is_some()
             || self.lineage_request.is_some()
@@ -1067,16 +1067,19 @@ pub enum ClientCommand {
     RoutingStatus {
         meta: CommandMeta,
     },
-    /// One dispatch selector — a lane or a familiar — resolved by the House.
-    /// `room_dir` lets the Host read the room spellbook a familiar needs.
+    /// One dispatch selector — a lane or a familiar — resolved by the House
+    /// against the spellbook pages PostgreSQL holds for this Host's room.
     RoutingDispatch {
         meta: CommandMeta,
-        room_dir: Option<String>,
         request: Value,
     },
     FamiliarStatus {
         meta: CommandMeta,
-        room_dir: Option<String>,
+    },
+    /// Replace one spellbook page whole: this Host's room or `house`.
+    SpellbookWrite {
+        meta: CommandMeta,
+        request: Value,
     },
     NormalizeLineage {
         meta: CommandMeta,
@@ -1169,6 +1172,7 @@ impl ClientCommand {
             | Self::RoutingStatus { meta }
             | Self::RoutingDispatch { meta, .. }
             | Self::FamiliarStatus { meta, .. }
+            | Self::SpellbookWrite { meta, .. }
             | Self::NormalizeLineage { meta, .. }
             | Self::SettleLineage { meta, .. }
             | Self::LogConversation { meta, .. }
@@ -1461,7 +1465,6 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
                 || raw.failure_reason.is_some()
                 || raw.compaction_summary.is_some()
                 || raw.routing_request.is_some()
-                || raw.room_dir.is_some()
                 || raw.context_request.is_some()
                 || raw.context_viewport_mode.is_some()
                 || raw.lineage_request.is_some()
@@ -1757,16 +1760,15 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
             let request = raw.routing_request.ok_or_else(|| {
                 CommandParseError::from_meta(&meta, "routing dispatch requires routing_request")
             })?;
-            Ok(ClientCommand::RoutingDispatch {
-                meta,
-                room_dir: raw.room_dir.filter(|value| !value.trim().is_empty()),
-                request,
-            })
+            Ok(ClientCommand::RoutingDispatch { meta, request })
         }
-        FAMILIAR_STATUS => Ok(ClientCommand::FamiliarStatus {
-            meta,
-            room_dir: raw.room_dir.filter(|value| !value.trim().is_empty()),
-        }),
+        FAMILIAR_STATUS => Ok(ClientCommand::FamiliarStatus { meta }),
+        SPELLBOOK_WRITE => {
+            let request = raw.routing_request.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "spellbook write requires routing_request")
+            })?;
+            Ok(ClientCommand::SpellbookWrite { meta, request })
+        }
         LINEAGE_NORMALIZE => {
             let request = raw.lineage_request.ok_or_else(|| {
                 CommandParseError::from_meta(&meta, "lineage normalize requires lineage_request")

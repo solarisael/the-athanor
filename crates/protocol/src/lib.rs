@@ -13,7 +13,7 @@ pub use contract::*;
 pub use host::*;
 
 use hearth::{
-    BackupOutcome, CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteReceipt,
+    BackupOutcome, CanonAttribution, CanonPointer, CanonReadRequest, CanonScope, CanonWriteReceipt,
     CanonWriteRequest, ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome,
     ClusterMaintenanceRequest, ClusterMaintenanceStatus, ClusterStaleness, ClusterSummary,
     GigaAuthority, GigaCandidate, GigaCandidateKind, GigaClassifierIdentity,
@@ -2116,6 +2116,14 @@ pub struct CanonWriteParams {
     #[serde(default)]
     pub supersedes: Vec<String>,
     pub attribution: CanonAttributionParams,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub min_elevation: Option<i32>,
+    #[serde(default)]
+    pub operator: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -2128,6 +2136,10 @@ pub struct CanonReadParams {
     pub name: Option<String>,
     #[serde(default)]
     pub include_history: bool,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub operator: Option<String>,
 }
 
 fn canon_id(value: &str, field: &str) -> Result<u64, ProtocolError> {
@@ -2175,6 +2187,14 @@ impl TryFrom<CanonWriteParams> for CanonWriteRequest {
             supersedes,
             attribution,
         )
+        .and_then(|request| {
+            request.with_axis(
+                value.operator.map(OperatorKey::new).transpose()?,
+                value.subject.map(OperatorKey::new).transpose()?,
+                value.scope.as_deref().map(CanonScope::parse).transpose()?,
+                value.min_elevation,
+            )
+        })
         .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
     }
 }
@@ -2183,13 +2203,39 @@ impl TryFrom<CanonReadParams> for CanonReadRequest {
     type Error = ProtocolError;
 
     fn try_from(value: CanonReadParams) -> Result<Self, Self::Error> {
-        let id = value
-            .id
-            .as_deref()
-            .map(|id| canon_id(id, "id"))
-            .transpose()?;
-        CanonReadRequest::new(value.room, id, value.name, value.include_history)
-            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+        if value.id.is_some() && value.subject.is_some() {
+            return Err(ProtocolError::InvalidParams(
+                "id does not combine with subject".into(),
+            ));
+        }
+
+        let reader = value
+            .operator
+            .map(OperatorKey::new)
+            .transpose()
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        let request = match value.subject {
+            Some(subject) => OperatorKey::new(subject).and_then(|subject| {
+                CanonReadRequest::for_subject(
+                    value.room,
+                    subject,
+                    value.name,
+                    value.include_history,
+                )
+            }),
+            None => {
+                let id = value
+                    .id
+                    .as_deref()
+                    .map(|id| canon_id(id, "id"))
+                    .transpose()?;
+
+                CanonReadRequest::new(value.room, id, value.name, value.include_history)
+            }
+        }
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+
+        Ok(request.with_reader(reader))
     }
 }
 
@@ -2198,6 +2244,10 @@ impl TryFrom<CanonReadParams> for CanonReadRequest {
 pub struct CanonEntityResult {
     pub entity_id: String,
     pub room: String,
+    #[serde(default)]
+    pub subject: Option<String>,
+    #[serde(default)]
+    pub scope: String,
     pub name: String,
     pub kind: String,
     pub summary: String,

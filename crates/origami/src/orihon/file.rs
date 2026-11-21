@@ -134,6 +134,10 @@ pub(super) fn source_snapshot(directory: &Path, room: &str) -> Result<Book, Erro
     load(directory, room)
 }
 
+pub fn next_seq_file(directory: &Path, room: &str) -> Result<i64, Error> {
+    source_snapshot(directory, room)?.next_seq()
+}
+
 fn record_path(directory: &Path, record: &Record) -> PathBuf {
     directory.join(format!("{}.jsonl", &record.said_at[..10]))
 }

@@ -1,0 +1,15 @@
+[package]
+name = "gui-leptos-trial"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# An empty workspace table makes this trial its own root. The Athanor
+# workspace above never builds it, and it never inherits that workspace.
+[workspace]
+
+[dependencies]
+leptos = { version = "0.8.22", features = ["csr"] }
+gloo-net = { version = "0.7", default-features = false, features = ["http"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"

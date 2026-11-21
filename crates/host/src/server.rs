@@ -13,8 +13,8 @@ use crate::policy::{RecallPolicySession, apply_requested_mode};
 use crate::presence::{PresenceRuntime, host_capabilities};
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
 use crate::routing::{
-    DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
-    load_spellbook,
+    DispatchRequest, StoredPage, familiar_status, house_dispatch, lane_status, load_spellbook,
+    spellbook_write_errors,
 };
 use crate::store::{
     DurableReceipt, HostDurableStore, PolicyCheckpoint, ProjectionCursor, RoomIdentity,
@@ -1033,31 +1033,30 @@ async fn execute_service_command(
             )
             .await
         }
-        ClientCommand::RoutingDispatch {
-            meta,
-            room_dir,
-            request,
-        } => {
-            let result = match resolve_room_dir(room_dir.as_deref(), &state.config) {
-                Ok(room_dir) => match serde_json::from_value::<DispatchRequest>(request) {
-                    Ok(request) => serde_json::to_value(house_dispatch(request, || {
-                        read_room_spellbook(room_dir.as_ref())
-                    }))
-                    .expect("dispatch receipt serializes"),
-                    Err(error) => invalid_routing_request("routing", error),
-                },
-                Err(rejection) => rejection,
+        ClientCommand::RoutingDispatch { meta, request } => {
+            let result = match serde_json::from_value::<DispatchRequest>(request) {
+                Ok(request) => {
+                    let pages = if request.familiar.trim().is_empty() {
+                        Ok(Vec::new())
+                    } else {
+                        read_spellbook_pages(state).await
+                    };
+                    let room = state.config.room.as_str();
+                    serde_json::to_value(house_dispatch(request, || load_spellbook(room, &pages)))
+                        .expect("dispatch receipt serializes")
+                }
+                Err(error) => invalid_routing_request("routing", error),
             };
             routing_response(state, meta, result).await
         }
-        ClientCommand::FamiliarStatus { meta, room_dir } => {
-            let result = match resolve_room_dir(room_dir.as_deref(), &state.config) {
-                Ok(room_dir) => {
-                    serde_json::to_value(familiar_status(read_room_spellbook(room_dir.as_ref())))
-                        .expect("familiar status serializes")
-                }
-                Err(rejection) => rejection,
-            };
+        ClientCommand::FamiliarStatus { meta } => {
+            let pages = read_spellbook_pages(state).await;
+            let result = serde_json::to_value(familiar_status(&state.config.room, &pages))
+                .expect("familiar status serializes");
+            routing_response(state, meta, result).await
+        }
+        ClientCommand::SpellbookWrite { meta, request } => {
+            let result = write_spellbook_page(state, request).await;
             routing_response(state, meta, result).await
         }
         ClientCommand::NormalizeLineage { meta, request } => {
@@ -1891,9 +1890,10 @@ async fn query_akasha_recall(
     };
     let params: RecallParams = serde_json::from_value(json!({
         "room": meta.sender_room,
-        "query": payload.query
+        "query": payload.query,
+        "operator": state.config.operator
     }))
-    .expect("recall params carry only the bound room and query, every tuning field defaulted");
+    .expect("recall params carry the bound room, query, and Host operator, every tuning field defaulted");
     let request = match hearth::RecallRequest::try_from(params) {
         Ok(request) => request,
         Err(error) => {
@@ -2285,19 +2285,103 @@ fn resolve_room_dir<'a>(
     }))
 }
 
-/// The Host owns the filesystem for House and room spellbook pages; `routing`
-/// owns which files those are and what they must contain.
-fn read_room_spellbook(room_dir: &str) -> LoadedSpellbook {
-    load_spellbook(room_dir, |candidate| {
-        match std::fs::read_to_string(candidate) {
-            Ok(text) => match serde_json::from_str(&text) {
-                Ok(page) => SpellbookRead::Parsed(page),
-                Err(error) => SpellbookRead::Malformed(error.to_string()),
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SpellbookRead::Missing,
-            Err(error) => SpellbookRead::Unreadable(error.to_string()),
-        }
+/// Every stored spellbook page, or the reason they could not be read.
+/// `routing` owns what the pages mean; the Host only reads the rows.
+async fn read_spellbook_pages(state: &AppState) -> Result<Vec<StoredPage>, String> {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        return Err(SPELLBOOK_NO_DATABASE.into());
+    };
+    select_spellbook_pages(pool).await
+}
+
+const SPELLBOOK_NO_DATABASE: &str = "this Host has no database";
+
+async fn select_spellbook_pages<'e>(
+    executor: impl sqlx::PgExecutor<'e>,
+) -> Result<Vec<StoredPage>, String> {
+    sqlx::query_as::<_, (String, sqlx::types::Json<Value>)>(
+        "SELECT scope, page FROM spellbook_pages ORDER BY scope",
+    )
+    .fetch_all(executor)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|(scope, sqlx::types::Json(page))| (scope, page))
+            .collect()
     })
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpellbookWriteRequest {
+    scope: String,
+    page: Value,
+}
+
+/// Replace one scope's page whole. The receipt carries this room's familiar
+/// status as it stands after the write, or after the refusal.
+async fn write_spellbook_page(state: &AppState, request: Value) -> Value {
+    let request = match serde_json::from_value::<SpellbookWriteRequest>(request) {
+        Ok(request) => request,
+        Err(error) => return invalid_routing_request("spellbook write", error),
+    };
+    let room = state.config.room.as_str();
+    let scope = request.scope.trim();
+    let outcome = match state.hallway_pool.as_ref() {
+        Some(pool) => write_spellbook_transaction(pool, room, scope, &request.page).await,
+        None => Err(SPELLBOOK_NO_DATABASE.into()),
+    };
+    let (errors, pages) = match outcome {
+        Ok((errors, pages)) => (errors, Ok(pages)),
+        Err(reason) => (
+            vec![format!("Spellbook unavailable: {reason}")],
+            Err(reason),
+        ),
+    };
+    json!({
+        "ok": errors.is_empty(),
+        "scope": scope,
+        "errors": errors,
+        "status": familiar_status(room, &pages),
+    })
+}
+
+/// One transaction: lock the pages, judge the write against every stored
+/// page, upsert, and read the pages back.
+async fn write_spellbook_transaction(
+    pool: &PgPool,
+    room: &str,
+    scope: &str,
+    page: &Value,
+) -> Result<(Vec<String>, Vec<StoredPage>), String> {
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('spellbook-pages', 0))")
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| error.to_string())?;
+    let pages = select_spellbook_pages(&mut *transaction).await?;
+
+    let errors = spellbook_write_errors(room, scope, page, &pages);
+    if !errors.is_empty() {
+        return Ok((errors, pages));
+    }
+
+    sqlx::query(
+        "INSERT INTO spellbook_pages (scope, page) VALUES ($1, $2) \
+         ON CONFLICT (scope) DO UPDATE SET page = EXCLUDED.page",
+    )
+    .bind(scope)
+    .bind(sqlx::types::Json(page))
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| error.to_string())?;
+    let pages = select_spellbook_pages(&mut *transaction).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((Vec::new(), pages))
 }
 
 fn read_quest_report(lifecycle: &QuestLifecycle) -> String {
@@ -3596,7 +3680,7 @@ mod tests {
     }
 
     #[test]
-    fn familiar_status_defaults_to_configured_room_dir() {
+    fn blank_room_dir_uses_configured_room_dir() {
         let config = config(KnockAutonomy::Off);
 
         let resolved =
@@ -3676,5 +3760,248 @@ mod tests {
             true,
             true
         ));
+    }
+}
+
+/// Spellbook pages against PostgreSQL through the Host's own commands: the
+/// load path reads every room's page, and a write is limited to this room and
+/// the House.
+#[cfg(test)]
+mod spellbook_pages_tests {
+    use super::{AppState, HOST_RECIPIENT, Host, process_text};
+    use serde_json::{Value, json};
+    use sqlx::PgPool;
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    use std::str::FromStr;
+    use tokio_util::sync::CancellationToken;
+    use tokio_util::task::TaskTracker;
+    use uuid::Uuid;
+
+    type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+    fn open(pool: PgPool, directory: &std::path::Path) -> TestResult<AppState> {
+        let config = crate::config::HostConfig {
+            bind: "127.0.0.1:0".parse()?,
+            bearer_token: "spellbook-test".into(),
+            room_dir: directory.to_path_buf(),
+            state_dir: directory.join("host"),
+            house_id: "solarisael".into(),
+            room: "kodo".into(),
+            spirit: "Kodo".into(),
+            session: "spellbook-host-session".into(),
+            database_url: None,
+            nats_url: None,
+            nats_auth: None,
+            knock_autonomy: crate::config::KnockAutonomy::Off,
+            operator: None,
+        };
+        std::fs::create_dir_all(config.room_state_path().parent().ok_or("room state path")?)?;
+        std::fs::create_dir_all(&config.state_dir)?;
+        let room_state = json!({
+            "room": "kodo", "operator": "Sol", "embodiedSpirit": "Kodo",
+            "recallPolicy": {
+                "requestedMode": "auto", "resolvedMode": "conversation",
+                "workingSetEntries": 0, "recoveryPending": false, "recoveryTerms": [],
+                "activeProject": null, "resolutionReason": "test",
+                "lastRefreshReason": null, "lastRefreshAt": null,
+                "degraded": null, "updatedAt": null
+            }
+        });
+        std::fs::write(config.room_state_path(), room_state.to_string())?;
+        Ok(Host::new(
+            config,
+            Some(pool),
+            CancellationToken::new(),
+            TaskTracker::new(),
+        )?
+        .state)
+    }
+
+    async fn command(state: &AppState, command_type: &str, request: Option<Value>) -> Value {
+        let config = &state.config;
+        let message_id = Uuid::new_v4().to_string();
+        let mut command = json!({
+            "schema_version": protocol::HOST_SCHEMA_VERSION,
+            "message_id": message_id, "correlation_id": message_id,
+            "idempotency_key": message_id, "causation_id": "",
+            "house_id": config.house_id, "sender_room": config.room,
+            "sender_spirit": config.spirit, "sender_session": config.session,
+            "recipient": HOST_RECIPIENT, "reply_target": config.session,
+            "scope": config.scope(), "visibility": "operator", "authority_class": "room_state",
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339(),
+            "max_hops": 1, "source_record_refs": [],
+            "projection_id": protocol::ROUTING_PROJECTION_ID,
+            "command_or_event_type": command_type,
+        });
+        if let Some(request) = request {
+            command["routing_request"] = request;
+        }
+        let response = process_text(state, &command.to_string()).await;
+        let event: Value =
+            serde_json::from_str(&response.direct[0]).expect("the routing result is JSON");
+        event["result"].clone()
+    }
+
+    async fn write(state: &AppState, scope: &str, page: Value) -> Value {
+        let request = json!({"scope": scope, "page": page});
+        command(state, protocol::SPELLBOOK_WRITE, Some(request)).await
+    }
+
+    async fn stored(pool: &PgPool, scope: &str) -> TestResult<Option<Value>> {
+        let page: Option<sqlx::types::Json<Value>> =
+            sqlx::query_scalar("SELECT page FROM spellbook_pages WHERE scope = $1")
+                .bind(scope)
+                .fetch_optional(pool)
+                .await?;
+        Ok(page.map(|sqlx::types::Json(page)| page))
+    }
+
+    fn familiar(id: &str) -> Value {
+        json!({"id": id, "name": id, "lane": "smol-scout", "description": "Works."})
+    }
+
+    fn require(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into().into())
+        }
+    }
+
+    async fn prove(state: &AppState, pool: &PgPool) -> TestResult {
+        let house =
+            json!({"version": 1, "collective": "familiars", "familiars": [familiar("scout")]});
+        let kintsu = json!({"collective": "wardens", "familiars": [familiar("lavra")]});
+        for (scope, page) in [("house", &house), ("kintsu", &kintsu)] {
+            sqlx::query("INSERT INTO spellbook_pages (scope, page) VALUES ($1, $2)")
+                .bind(scope)
+                .bind(sqlx::types::Json(page))
+                .execute(pool)
+                .await?;
+        }
+
+        // Load path: this room sees another room's familiar with its origin.
+        let status = command(state, protocol::FAMILIAR_STATUS, None).await;
+        require(status["ok"] == true, format!("status: {status}"))?;
+        require(
+            status["pages"]["house"] == house,
+            "status shows the House page",
+        )?;
+        require(status["pages"]["room"].is_null(), "kodo has no page yet")?;
+        let lavra = json!({"task": "Read the target.", "familiar": "lavra",
+            "lessonBodies": ["Read exact sources before acting."]});
+        let dispatched = command(state, protocol::ROUTING_DISPATCH, Some(lavra)).await;
+        require(dispatched["ok"] == true, format!("dispatch: {dispatched}"))?;
+        require(
+            dispatched["familiar"]["origin"] == "kintsu",
+            "lavra comes from kintsu",
+        )?;
+        require(
+            dispatched["spellbook"]["collective"] == "wardens",
+            "identity from kintsu",
+        )?;
+
+        // Own room: accepted and visible in the post-write status.
+        let own = json!({"familiars": [familiar("keeper")]});
+        let receipt = write(state, "kodo", own.clone()).await;
+        require(receipt["ok"] == true, format!("own room write: {receipt}"))?;
+        require(
+            receipt["status"]["pages"]["room"] == own,
+            "post-write status",
+        )?;
+        require(stored(pool, "kodo").await? == Some(own), "kodo row written")?;
+
+        // House: accepted.
+        let guided = json!({"version": 1, "collective": "familiars", "guide": "Organs.",
+            "familiars": [familiar("scout")]});
+        let receipt = write(state, "house", guided.clone()).await;
+        require(receipt["ok"] == true, format!("house write: {receipt}"))?;
+        require(
+            stored(pool, "house").await? == Some(guided.clone()),
+            "house row written",
+        )?;
+
+        // Another room: refused, and its row is untouched.
+        let receipt = write(state, "kintsu", json!({"familiars": []})).await;
+        require(receipt["ok"] == false, format!("foreign write: {receipt}"))?;
+        require(
+            receipt["errors"][0]
+                .as_str()
+                .is_some_and(|error| error.contains("scope 'kintsu' is neither this room")),
+            format!("foreign refusal: {receipt}"),
+        )?;
+        require(
+            stored(pool, "kintsu").await? == Some(kintsu),
+            "kintsu row untouched",
+        )?;
+
+        // A House page that would break kodo's page: refused, row untouched.
+        let versionless = json!({"collective": "familiars", "familiars": [familiar("scout")]});
+        let receipt = write(state, "house", versionless).await;
+        require(
+            receipt["ok"] == false,
+            format!("breaking house write: {receipt}"),
+        )?;
+        let errors = receipt["errors"].to_string();
+        require(
+            errors.contains("Room 'kodo' would break"),
+            format!("names kodo: {errors}"),
+        )?;
+        require(
+            stored(pool, "house").await? == Some(guided),
+            "house row untouched",
+        )?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; creates and drops one isolated schema"]
+    async fn spellbook_pages_load_every_room_and_write_only_this_room_or_the_house() {
+        let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
+            .expect("the spellbook proof requires a dedicated PostgreSQL URL");
+        let lower = url.to_ascii_lowercase();
+        assert!(
+            !lower.contains("solarisael_memory") && !lower.contains("solarisael-house"),
+            "refusing a live or production-looking database"
+        );
+        let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
+        let admin = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(options.clone())
+            .await
+            .expect("isolated database must be reachable");
+        let schema = format!("athanor_spellbook_test_{}", Uuid::new_v4().simple());
+        sqlx::query(&format!("CREATE SCHEMA {schema}"))
+            .execute(&admin)
+            .await
+            .expect("isolated spellbook schema must create");
+        let directory = std::env::temp_dir().join(format!("athanor-spellbook-{}", Uuid::new_v4()));
+        let connection_schema = schema.clone();
+        let outcome: TestResult = async {
+            let pool = PgPoolOptions::new()
+                .max_connections(4)
+                .after_connect(move |connection, _meta| {
+                    let schema = connection_schema.clone();
+                    Box::pin(async move {
+                        sqlx::query(&format!("SET search_path TO {schema}, public"))
+                            .execute(connection)
+                            .await?;
+                        Ok(())
+                    })
+                })
+                .connect_with(options)
+                .await?;
+            akasha::migrations::run_migrations(&pool).await?;
+            let state = open(pool.clone(), &directory)?;
+            prove(&state, &pool).await
+        }
+        .await;
+        sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .execute(&admin)
+            .await
+            .expect("isolated spellbook schema must drop");
+        let _ = std::fs::remove_dir_all(&directory);
+        outcome.expect("spellbook pages contract");
     }
 }

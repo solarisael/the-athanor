@@ -758,20 +758,6 @@ impl Live {
         }
     }
 
-    /// The room's last accepted record. File rooms answer through the ingested prefix.
-    pub async fn last_seq(&self) -> Result<Option<i64>, Error> {
-        match (&self.store, &self.file) {
-            (_, Some(state)) => Ok(state.unit_ends.keys().next_back().copied()),
-            (Store::Postgres(pool), None) => Ok(sqlx::query_scalar(
-                "SELECT max(seq) FROM orihon WHERE room=$1",
-            )
-            .bind(&self.room)
-            .fetch_one(pool)
-            .await?),
-            (Store::File(_), None) => unreachable!("file rooms keep file state"),
-        }
-    }
-
     /// The seq of one accepted source record of a harness session.
     pub async fn source_seq(
         &self,
@@ -799,26 +785,6 @@ impl Live {
         }
     }
 
-    /// The first accepted seq of a harness session.
-    pub async fn session_first(&self, harness: &str, session: &str) -> Result<Option<i64>, Error> {
-        match (&self.store, &self.file) {
-            (_, Some(state)) => Ok(state
-                .sessions
-                .get(&(harness.to_owned(), session.to_owned()))
-                .and_then(|records| records.first())
-                .map(|record| record.seq)),
-            (Store::Postgres(pool), None) => Ok(sqlx::query_scalar(
-                "SELECT min(seq) FROM orihon WHERE room=$1 AND harness=$2 AND source_session=$3",
-            )
-            .bind(&self.room)
-            .bind(harness)
-            .bind(session)
-            .fetch_one(pool)
-            .await?),
-            (Store::File(_), None) => unreachable!("file rooms keep file state"),
-        }
-    }
-
     /// At most `limit` accepted records of a harness session after `after`, oldest first.
     pub async fn session_after(
         &self,
@@ -832,12 +798,9 @@ impl Live {
                 .sessions
                 .get(&(harness.to_owned(), session.to_owned()))
                 .map(|records| {
-                    records
-                        .iter()
-                        .filter(|record| record.seq > after)
-                        .take(limit)
-                        .cloned()
-                        .collect()
+                    // Load and ingest push each session's records in ascending seq order.
+                    let start = records.partition_point(|record| record.seq <= after);
+                    records[start..].iter().take(limit).cloned().collect()
                 })
                 .unwrap_or_default()),
             (Store::Postgres(pool), None) => {

@@ -1,4 +1,5 @@
 use crate::error::DomainError;
+use crate::operator::OperatorKey;
 use crate::room::RoomKey;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,6 +27,36 @@ impl CanonAuthority {
                 field: "authority".into(),
                 message: format!("unknown authority: {other}"),
             }),
+        }
+    }
+}
+
+/// How far a canon row travels. Canon has its own default; `MemoryScope::default_for` does not apply.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CanonScope {
+    Company,
+    Up,
+    Private,
+}
+
+impl CanonScope {
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "company" => Ok(Self::Company),
+            "up" => Ok(Self::Up),
+            "private" => Ok(Self::Private),
+            other => Err(DomainError::InvalidCanon {
+                field: "scope".into(),
+                message: format!("unknown scope: {other}"),
+            }),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Company => "company",
+            Self::Up => "up",
+            Self::Private => "private",
         }
     }
 }
@@ -139,6 +170,10 @@ pub struct CanonWriteRequest {
     summary_as_of: Option<String>,
     supersedes: Vec<u64>,
     attribution: CanonAttribution,
+    writer: Option<OperatorKey>,
+    subject: Option<OperatorKey>,
+    scope: CanonScope,
+    min_elevation: Option<i32>,
 }
 
 impl CanonWriteRequest {
@@ -196,7 +231,63 @@ impl CanonWriteRequest {
             summary_as_of,
             supersedes,
             attribution,
+            writer: None,
+            subject: None,
+            scope: CanonScope::Company,
+            min_elevation: None,
         })
+    }
+
+    pub fn with_axis(
+        mut self,
+        writer: Option<OperatorKey>,
+        subject: Option<OperatorKey>,
+        scope: Option<CanonScope>,
+        min_elevation: Option<i32>,
+    ) -> Result<Self, DomainError> {
+        let scope = scope.unwrap_or(if subject.is_some() {
+            CanonScope::Private
+        } else {
+            CanonScope::Company
+        });
+
+        if scope != CanonScope::Company && subject.is_none() {
+            return Err(DomainError::InvalidCanon {
+                field: "scope".into(),
+                message: "a scope other than company needs a subject".into(),
+            });
+        }
+        if scope == CanonScope::Up {
+            return Err(DomainError::InvalidCanon {
+                field: "scope".into(),
+                message: "the scope up is not available for canon yet".into(),
+            });
+        }
+        if min_elevation.is_some() {
+            return Err(DomainError::InvalidCanon {
+                field: "minElevation".into(),
+                message: "minElevation needs the scope up".into(),
+            });
+        }
+        if subject.is_some() && writer.is_none() {
+            return Err(DomainError::InvalidCanon {
+                field: "subject".into(),
+                message: "a row with a subject needs a Host operator".into(),
+            });
+        }
+        if scope == CanonScope::Private && writer != subject {
+            return Err(DomainError::InvalidCanon {
+                field: "subject".into(),
+                message: "only the subject writes a private fact".into(),
+            });
+        }
+
+        self.writer = writer;
+        self.subject = subject;
+        self.scope = scope;
+        self.min_elevation = min_elevation;
+
+        Ok(self)
     }
 
     pub fn room(&self) -> &RoomKey {
@@ -232,12 +323,33 @@ impl CanonWriteRequest {
     pub fn attribution(&self) -> &CanonAttribution {
         &self.attribution
     }
+
+    pub fn writer(&self) -> Option<&OperatorKey> {
+        self.writer.as_ref()
+    }
+
+    pub fn subject(&self) -> Option<&OperatorKey> {
+        self.subject.as_ref()
+    }
+
+    pub fn scope(&self) -> CanonScope {
+        self.scope
+    }
+
+    pub fn min_elevation(&self) -> Option<i32> {
+        self.min_elevation
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CanonSelector {
     Id(u64),
     Name(String),
+    /// Facts about one operator. Covers the request room and `house`.
+    Subject {
+        subject: OperatorKey,
+        name: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -245,6 +357,7 @@ pub struct CanonReadRequest {
     room: RoomKey,
     selector: CanonSelector,
     include_history: bool,
+    reader: Option<OperatorKey>,
 }
 
 impl CanonReadRequest {
@@ -269,7 +382,35 @@ impl CanonReadRequest {
             room,
             selector,
             include_history,
+            reader: None,
         })
+    }
+
+    pub fn for_subject(
+        room: String,
+        subject: OperatorKey,
+        name: Option<String>,
+        include_history: bool,
+    ) -> Result<Self, DomainError> {
+        let room = RoomKey::for_canon(room)?;
+        let name = name.map(|name| canon_nonempty("name", name)).transpose()?;
+
+        Ok(Self {
+            room,
+            selector: CanonSelector::Subject { subject, name },
+            include_history,
+            reader: None,
+        })
+    }
+
+    pub fn with_reader(mut self, reader: Option<OperatorKey>) -> Self {
+        self.reader = reader;
+
+        self
+    }
+
+    pub fn reader(&self) -> Option<&OperatorKey> {
+        self.reader.as_ref()
     }
 
     pub fn room(&self) -> &RoomKey {

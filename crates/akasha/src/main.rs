@@ -3,7 +3,7 @@ use akasha::insula_writer::{
     end_span, flush_insula_emitter, init_insula_emitter, record_point, record_timed_point,
     start_span, system_binding,
 };
-use akasha::migrations::{migration_pool, run_migrations};
+use akasha::migrations::{migration_pool, run_migrations_with_starter_pages};
 #[cfg(test)]
 use akasha::native::retention::retention_schedule;
 use akasha::native::{
@@ -12,6 +12,7 @@ use akasha::native::{
 };
 #[cfg(test)]
 use akasha::native::{ProtocolRequest, protocol_error_class};
+use akasha::operator_registry::{OperatorRegistration, register_operator};
 use akasha::{
     AppError, Config, GigaWorkerHandle, OutcomeClass, SubstrateHealthOptions, TrustedBinding,
     refresh_semantic_vocabulary, spawn_giga_worker, substrate_health_with_config,
@@ -188,9 +189,50 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
             let pool = migration_pool(&config)
                 .await
                 .map_err(|error| error.to_string())?;
-            let result = run_migrations(&pool)
+            let result = run_migrations_with_starter_pages(&pool)
                 .await
                 .map_err(|error| error.to_string())?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
+        "operator-register" => {
+            let flags = [
+                "--key",
+                "--display-name",
+                "--unit",
+                "--unit-name",
+                "--env-file",
+            ];
+            let names = if args.len() == 8 {
+                &flags[..4]
+            } else {
+                &flags[..]
+            };
+            let mut values =
+                expect(names).map_err(|error| format!("operator-register: {error}"))?;
+            let env_file = if values.len() == 5 {
+                Some(PathBuf::from(values.remove(4)))
+            } else {
+                None
+            };
+            let [key, display_name, unit, unit_name]: [String; 4] = values
+                .try_into()
+                .map_err(|_| "operator-register: unexpected or missing arguments")?;
+            let registration = OperatorRegistration {
+                unit,
+                unit_name,
+                key,
+                display_name,
+            };
+            registration.validate()?;
+
+            let config = env_file
+                .as_ref()
+                .map_or_else(Config::from_env, |path| Config::from_env_file(path))
+                .map_err(|error| error.to_string())?;
+            let pool = migration_pool(&config)
+                .await
+                .map_err(|error| error.to_string())?;
+            let result = register_operator(&pool, &registration).await?;
             println!("{}", serde_json::to_string(&result)?);
         }
         "semantic-vocabulary-refresh" => {

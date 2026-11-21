@@ -284,19 +284,19 @@ export function installOrihon(pi: any): OrihonCapture {
   onBeforeShutdownDetach(pi, (ctx) => schedule(ctx));
 
   pi.registerCommand("orihon", {
-    description: "Show Orihon status, set off/log, or go live with fold local MODEL:TAG or fold hosted [provider/model]",
+    description: "Show Orihon status, set off/log, or go live with fold local MODEL:TAG or fold hosted [@role|provider/model]",
     handler: async (args: string, ctx: any) => {
       const [word, ...rest] = args.trim().split(/\s+/);
       const command = word || "status";
       if (!["status", "off", "log", "fold"].includes(command) || rest.length > 2 || (rest.length && command !== "fold")) {
-        notify(ctx, "Use /orihon status, off, log, fold local MODEL:TAG, or fold hosted [provider/model]. Fold is live mode: every new turn sees the chat view instead of the old conversation.", "warning");
+        notify(ctx, "Use /orihon status, off, log, fold local MODEL:TAG, or fold hosted [@role|provider/model]. Fold is live mode: every new turn sees the chat view instead of the old conversation.", "warning");
         return;
       }
       try {
         const current = identity(ctx);
         if (!current) throw new Error("Orihon requires an attached House room");
         await inFlight.get(current.key)?.catch(() => undefined);
-        const folder = command === "fold" ? await foldOptions(rest, ctx.cwd, pi) : {};
+        const folder = command === "fold" ? await foldOptions(rest, ctx.cwd, pi, (selector) => ctx.models?.resolve(selector)) : {};
         if (identity(ctx)?.key !== current.key) throw new Error("Orihon session changed before folder configuration");
         const prepared = await prepare(ctx, command === "status" ? undefined : command as "off" | "log" | "fold", folder);
         if (!prepared) throw new Error("Orihon room detached before its mode response");

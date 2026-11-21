@@ -59,7 +59,7 @@ const ROOM_CONTINUITY_TOOLS = new Set([
   "wake", "sleep", "room_state", "set_room_state", "anamnesis", "anamnesis_write",
   "hallway_create", "hallway_join", "hallway_post", "hallway_read", "hallway_inbox",
   "hallway_knock", "hallway_knock_policy", "recall_policy", "house_model_default",
-  "house_routing_mode", "request_restart",
+  "house_routing_mode", "request_restart", "spellbook_write",
 ]);
 
 // Room-derived blocks a worker request must never carry, whichever path

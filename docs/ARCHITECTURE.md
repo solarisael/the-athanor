@@ -166,6 +166,8 @@ The Host keeps one current Recall block and one current Presence block.
 It retires old topical evidence before a refresh and records that removal before retrieval.
 The Recall block is the single visible owner of topical evidence.
 Stable Presence frames contain no retrieved project material.
+A frame can carry the operator card: standing canon facts about the Host operator, selected when the frame opens.
+The card does not depend on a query or on the Recall mode. See [Operator canon](OPERATOR_CANON_DESIGN.md).
 Context format 2 performs the stored-state cutover.
 Physical replacement can invalidate provider prefix caching; cache savings require measurement.
 
@@ -176,14 +178,16 @@ Every receipt carries `executed: false`.
 Accepted packets contain `spawnPacket { tool: "task", args }`.
 Four lanes exist: `smol-scout`, `smol-executor`, `tester`, and `verifier`.
 
-The loader reads the shared House spellbook before the room page.
-The shared page lives at `<parent of room_dir>/house/familiars/spellbook.json`.
-The room page lives at `<room_dir>/familiars/spellbook.json`.
-Each layer accepts `litters.json` when its primary file is absent.
+PostgreSQL table `spellbook_pages` holds the spellbooks, one page for each scope.
+Scope `house` is the shared page. Every other scope is a room key.
+The requester's room is the Host's configured room.
 
 Room keys replace shared values whole. Familiar entries replace matching `id` entries.
+Familiar precedence, highest first: the requester's room, the House, then every other room.
+A foreign familiar never refuses the room's book. An id or key two other rooms claim is contested and refused.
+`spellbook_write` replaces the room's own page or the House page after validation.
 The Host includes the effective guide in prepared room context.
-Sources: `routing.rs`, `routing/spellbook.rs`, and `server/context_session/assembly.rs`.
+Sources: `routing.rs`, `routing/spellbook.rs`, `server.rs`, and `server/context_session/assembly.rs`.
 
 ## 4. The OMP adapter
 

@@ -1,4 +1,11 @@
 use super::*;
+use akasha::operator_card::{OperatorCardRow, operator_card_rows};
+
+const CARD_MAX_ROWS: usize = 40;
+const CARD_MAX_CHARS: usize = 4096;
+const CARD_ROW_MAX_CHARS: usize = 200;
+const CARD_CUT_MARK: &str =
+    "\n[operator card cut: more weighty facts exist; list them with canon_read and the subject]";
 
 pub(super) fn material(
     id: String,
@@ -8,6 +15,99 @@ pub(super) fn material(
     salience: u16,
 ) -> Value {
     json!({"id":id,"authority":authority,"role":role,"body":body,"salience":salience})
+}
+
+pub(super) async fn fetch_operator_card(state: &AppState, room: &str) -> Vec<Value> {
+    let Some(reader) = state.config.operator.as_deref() else {
+        return Vec::new();
+    };
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        tracing::warn!(room, "Presence operator card unavailable: no database pool");
+        return Vec::new();
+    };
+
+    match operator_card_rows(pool, room, reader, (CARD_MAX_ROWS + 1) as i64).await {
+        Ok(rows) => operator_card(rows),
+        Err(error) => {
+            tracing::warn!(%error, room, "Presence operator card unavailable");
+            Vec::new()
+        }
+    }
+}
+
+/// One card line: name, kind, and the start of the summary. `canon_read` returns the complete row.
+fn operator_card_line(row: &OperatorCardRow) -> String {
+    let mut characters = row
+        .name
+        .chars()
+        .chain(" (".chars())
+        .chain(row.kind.chars())
+        .chain("): ".chars())
+        .chain(row.summary.chars())
+        .map(|character| {
+            if character.is_whitespace() {
+                ' '
+            } else {
+                character
+            }
+        });
+    let mut line: String = characters.by_ref().take(CARD_ROW_MAX_CHARS).collect();
+
+    if characters.next().is_some() {
+        line.pop();
+        line.push('…');
+    }
+
+    line
+}
+
+/// Standing canon index. Presence refuses a frame over its limits, so the card arrives inside
+/// them: at most `CARD_MAX_ROWS` rows and `CARD_MAX_CHARS` characters, the cut mark included.
+pub(super) fn operator_card(rows: Vec<OperatorCardRow>) -> Vec<Value> {
+    let mut card = Vec::with_capacity(rows.len().min(CARD_MAX_ROWS));
+    let mut remaining = CARD_MAX_CHARS;
+    let mut cut = rows.len() > CARD_MAX_ROWS;
+
+    for (index, row) in rows.iter().take(CARD_MAX_ROWS).enumerate() {
+        let line = operator_card_line(row);
+        let line_chars = line.chars().count();
+
+        if line_chars > remaining {
+            cut = true;
+            break;
+        }
+
+        remaining -= line_chars;
+        card.push(material(
+            format!("operator-card:{}", row.entity_id),
+            json!({"kind":"canon","entity_id":row.entity_id.to_string()}),
+            "continuity",
+            line,
+            960 - index as u16,
+        ));
+    }
+
+    if !cut {
+        return card;
+    }
+
+    let mark_chars = CARD_CUT_MARK.chars().count();
+
+    while remaining < mark_chars {
+        let Some(dropped) = card.pop() else {
+            return card;
+        };
+
+        remaining += dropped["body"]
+            .as_str()
+            .map_or(0, |body| body.chars().count());
+    }
+
+    if let Some(Value::String(body)) = card.last_mut().and_then(|last| last.get_mut("body")) {
+        body.push_str(CARD_CUT_MARK);
+    }
+
+    card
 }
 
 pub(super) fn pulse(state: &AppState) -> Result<Option<Value>, String> {
@@ -332,6 +432,24 @@ mod tests {
     use super::*;
     use summoning::presence::{PresenceAuthority, PresenceMaterial, PresenceMaterialRole};
 
+    fn card_row(entity_id: i64, summary: String) -> OperatorCardRow {
+        OperatorCardRow {
+            entity_id,
+            name: "role".into(),
+            kind: "role".into(),
+            summary,
+        }
+    }
+
+    fn typed_card(rows: Vec<OperatorCardRow>) -> Vec<PresenceMaterial> {
+        operator_card(rows)
+            .into_iter()
+            .map(|value| {
+                serde_json::from_value(value).expect("card material matches Presence wire shape")
+            })
+            .collect()
+    }
+
     #[test]
     fn retrieved_canon_keeps_authority_without_becoming_spirit_identity() {
         for kind in ["project", "person", "spirit"] {
@@ -389,5 +507,201 @@ mod tests {
             }))
             .is_empty()
         );
+    }
+
+    #[test]
+    fn operator_card_marks_41_rows_but_not_40() {
+        for count in [40, 41] {
+            let card = typed_card(
+                (1..=count)
+                    .map(|id| card_row(id, "Brief fact".into()))
+                    .collect(),
+            );
+
+            assert_eq!(
+                card.len(),
+                40,
+                "the row cap must neither leak nor drop row 40"
+            );
+            assert_eq!(card[0].body, "role (role): Brief fact");
+            assert_eq!(card[39].id, "operator-card:40");
+            assert_eq!(
+                card.iter()
+                    .filter(|material| material.body.contains("[operator card cut:"))
+                    .count(),
+                usize::from(count == 41),
+                "only an omitted row earns a cut mark"
+            );
+
+            if count == 41 {
+                assert!(
+                    card[39]
+                        .body
+                        .lines()
+                        .last()
+                        .unwrap()
+                        .starts_with("[operator card cut:")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn operator_card_reserves_the_cut_mark_inside_4096_characters() {
+        // 21 lines fit in 4095 characters; the mark must evict the twenty-first.
+        let card = typed_card((1..=40).map(|id| card_row(id, "𝔽".repeat(182))).collect());
+        let characters: usize = card
+            .iter()
+            .map(|material| material.body.chars().count())
+            .sum();
+
+        assert_eq!(
+            card.len(),
+            20,
+            "a byte budget or an unreserved mark loses the boundary"
+        );
+        assert!(
+            characters <= 4096,
+            "the complete card costs {characters} characters, mark included"
+        );
+
+        for (index, material) in card.iter().enumerate() {
+            assert_eq!(material.id, format!("operator-card:{}", index + 1));
+            assert_eq!(material.body.lines().next().unwrap().chars().count(), 195);
+        }
+
+        assert_eq!(
+            card.iter()
+                .filter(|material| material.body.contains("[operator card cut:"))
+                .count(),
+            1
+        );
+        assert!(
+            card.last()
+                .unwrap()
+                .body
+                .lines()
+                .last()
+                .unwrap()
+                .starts_with("[operator card cut:")
+        );
+    }
+
+    #[test]
+    fn operator_card_accepts_exactly_4096_characters_and_marks_one_over() {
+        for extra in [0, 1] {
+            let mut rows = (1..=20)
+                .map(|id| card_row(id, "x".repeat(187)))
+                .collect::<Vec<_>>();
+            rows.push(card_row(21, "x".repeat(83 + extra)));
+            let card = typed_card(rows);
+
+            if extra == 0 {
+                assert_eq!(card.len(), 21, "the exact character ceiling is admissible");
+                assert_eq!(
+                    card.iter()
+                        .map(|material| material.body.chars().count())
+                        .sum::<usize>(),
+                    4096
+                );
+                assert!(
+                    card.iter()
+                        .all(|material| !material.body.contains("[operator card cut:"))
+                );
+            } else {
+                assert_eq!(card.len(), 20);
+                assert!(
+                    card[19].body.contains("[operator card cut:"),
+                    "one character over must be visible as a cut"
+                );
+                assert!(
+                    card.iter()
+                        .map(|material| material.body.chars().count())
+                        .sum::<usize>()
+                        <= 4096
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn operator_card_clips_only_after_200_characters() {
+        for extra in [0, 1] {
+            let card = typed_card(vec![card_row(42, "x".repeat(187 + extra))]);
+            let body = &card[0].body;
+
+            assert_eq!(body.chars().count(), 200);
+            assert_eq!(body.lines().count(), 1);
+            assert_eq!(
+                body.ends_with('…'),
+                extra == 1,
+                "only a clipped row ends in an ellipsis"
+            );
+            assert!(body.starts_with("role (role): "));
+        }
+    }
+
+    #[test]
+    fn operator_card_flattens_summary_newlines_without_losing_words() {
+        let card = typed_card(vec![card_row(
+            42,
+            "First\nsecond\r\nthird\tfourth\u{2028}fifth".into(),
+        )]);
+        let body = &card[0].body;
+
+        assert_eq!(body.lines().count(), 1);
+        assert_eq!(
+            body.split_whitespace().collect::<Vec<_>>(),
+            [
+                "role", "(role):", "First", "second", "third", "fourth", "fifth"
+            ]
+        );
+    }
+
+    #[test]
+    fn operator_card_clips_unicode_by_characters_not_bytes_or_utf16_units() {
+        for extra in [0, 1] {
+            let card = typed_card(vec![card_row(42, "𝔽".repeat(187 + extra))]);
+            let expected = if extra == 0 {
+                format!("role (role): {}", "𝔽".repeat(187))
+            } else {
+                format!("role (role): {}…", "𝔽".repeat(186))
+            };
+
+            assert_eq!(card[0].body, expected);
+            assert_eq!(card[0].body.chars().count(), 200);
+        }
+    }
+
+    #[test]
+    fn operator_card_materials_keep_canon_authority_in_a_distinct_id_namespace() {
+        let ids = [1, 42, i64::MAX];
+        let card = typed_card(
+            ids.into_iter()
+                .map(|id| card_row(id, "Brief fact".into()))
+                .collect(),
+        );
+
+        assert_eq!(card.len(), ids.len());
+
+        for (material, id) in card.iter().zip(ids) {
+            assert_eq!(material.id, format!("operator-card:{id}"));
+            assert!(
+                !material.id.starts_with("canon:"),
+                "recall reserves the canon: namespace"
+            );
+            assert_eq!(
+                material.authority,
+                PresenceAuthority::Canon {
+                    entity_id: id.to_string()
+                }
+            );
+            assert_eq!(material.role, PresenceMaterialRole::Continuity);
+        }
+    }
+
+    #[test]
+    fn operator_card_with_no_rows_emits_neither_material_nor_mark() {
+        assert!(typed_card(Vec::new()).is_empty());
     }
 }

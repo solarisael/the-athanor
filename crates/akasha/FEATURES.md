@@ -25,7 +25,9 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 
 - `Engine` builds one live-tree node line per `summarize` call. The Host opens one engine per room prefix and folder model, picks the nodes, writes their prompts, and stores every returned job.
 - A call has the turn's shape: the harness's exact system parts and tool definitions (never executed), one user message with the compactor view's whole 4-line blocks as separate text parts, then one user message with the tail and the task.
-- A line over 512 bytes gets the same-conversation "Too long" correction. After five replies the shortest complete one stands, up to the 16 KiB model-line ceiling. A reply cut by the output budget is never kept.
+- A retry sends the initial request with only the latest "Too long" correction.
+  After five replies, the shortest complete reply stands, up to 16 KiB.
+  The engine discards replies that reach the output limit.
 - A failed call ends its job. The Host retries failed work after 60 seconds while a registered fold session participates.
   A message boundary can retry sooner. Loss of consent or room ownership stops automatic retries.
 - Every job receipt lists each attempt: outcome, bytes, input/output/cache-read/cache-write tokens, price, stop reason, and time. An unreported count stays empty, and a missing price names its reason.
@@ -84,6 +86,8 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `load_amendments` attaches `amendedBy` and `amends` to each memory candidate in one query. It omits each amendment whose other memory the reader cannot read. An amendment never changes the ranking.
 - `attach_memory_links` runs the three loaders once for the final candidate set.
 - The canon lane matches named entities three ways: whole phrase, exact token, then fuzzy similarity.
+- A canon row with a subject enters the exact-token tier only when the query names that subject as a whole word.
+- The canon lane applies the canon visibility predicate before order and limit.
 - `protocol_pointer_files` normalizes stored pointer files to the wire shape `{file, lines}`. Legacy strings and extra keys stay in the database.
 - `embed_texts`, `embed_text`, and `embed_query` are the embedding client. The `query: ` prefix is load-bearing and pairs with the indexer prefix.
 - `query_terms`, `query_dates`, `term_evidence`, `candidate_terms`, and `bounded_excerpt` build the evidence each candidate carries.
@@ -221,10 +225,19 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 ### canon.rs — typed canon authority
 
 - `canon_write` writes one canonical entity. A write never overwrites: it supersedes the named predecessors.
-- `lock_predecessors` locks and checks every predecessor before the write, so a rename keeps its lineage.
-- `canon_read` reads by id or by name. `include_history` returns the superseded rows too.
-- `entity_result` returns the full authority fields: authority, supersedes, superseded by, attribution, and pointer files.
+- A canon row can have a `subject`, a registered operator, and a `scope`. The active name is unique for each room and subject.
+- `canon_scope.rs` holds the one visibility predicate. A reader sees a row with no subject, a `company` row, and a row about that reader.
+- A write with the scope `up` refuses. Only the subject writes or supersedes a `private` row.
+- `lock_predecessors` locks and checks every predecessor before the write, so a rename keeps its lineage. A hidden predecessor refuses with the text for an absent one.
+- `canon_read` reads by id, by name, or by subject. A read by subject covers the room and `house`. `include_history` returns the superseded rows too.
+- `entity_result` returns the full authority fields: authority, supersedes, superseded by, attribution, and pointer files. It shows a lineage link only when the reader can see the linked row.
 - `canon_database_error` maps a constraint failure to a caller-facing refusal.
+
+### operator_card.rs and operator_registry.rs — the operator and the card
+
+- `operator_card_rows` reads the active, weighty canon rows about one operator, from the room and from `house`.
+- `register_operator` adds one unit and one operator when they are absent. A second run changes nothing.
+- The `athanor-substrate operator-register` command calls `register_operator`. No Host tool registers an operator.
 
 ### migrations.rs — the schema lineage
 

@@ -246,6 +246,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "0047_memory_amendments.sql",
         sql: include_str!("../../../substrate/migrations/0047_memory_amendments.sql"),
     },
+    Migration {
+        version: 48,
+        name: "0048_operator_canon.sql",
+        sql: include_str!("../../../substrate/migrations/0048_operator_canon.sql"),
+    },
+    Migration {
+        version: 49,
+        name: "0049_spellbook_pages.sql",
+        sql: include_str!("../../../substrate/migrations/0049_spellbook_pages.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version
@@ -448,6 +458,46 @@ pub async fn run_migrations(pool: &PgPool) -> Result<MigrationResult, AppError> 
     })
 }
 
+/// The starter House spellbook page a fresh install receives. The adapter
+/// file is only its source; the Host reads pages from `spellbook_pages`.
+pub const STARTER_HOUSE_SPELLBOOK: &str =
+    include_str!("../../../adapters/omp/starter-room/house/familiars/spellbook.json");
+
+/// The install migration step: the owned schema, then the starter House page.
+pub async fn run_migrations_with_starter_pages(pool: &PgPool) -> Result<MigrationResult, AppError> {
+    let result = run_migrations(pool).await?;
+
+    seed_starter_house_spellbook(pool).await?;
+    Ok(result)
+}
+
+// An existing house row always wins, an explicit empty page included: that
+// is how an operator clears the House book, and a rerun must not undo it.
+async fn seed_starter_house_spellbook(pool: &PgPool) -> Result<(), AppError> {
+    let page = starter_house_spellbook()?;
+
+    sqlx::query(
+        "INSERT INTO spellbook_pages (scope, page) VALUES ('house', $1) ON CONFLICT (scope) DO NOTHING",
+    )
+    .bind(sqlx::types::Json(page))
+    .execute(pool)
+    .await
+    .map_err(AppError::Database)?;
+    Ok(())
+}
+
+fn starter_house_spellbook() -> Result<serde_json::Value, AppError> {
+    let page = serde_json::from_str::<serde_json::Value>(STARTER_HOUSE_SPELLBOOK)
+        .map_err(|error| AppError::Config(format!("starter house spellbook: {error}")))?;
+
+    if !page.is_object() {
+        return Err(AppError::Config(
+            "starter house spellbook must be a JSON object".into(),
+        ));
+    }
+    Ok(page)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +508,11 @@ mod tests {
         assert!(state_from(vec![1, 2, 3]).is_ok());
         assert!(state_from(vec![1, 3]).is_err());
         assert!(state_from(vec![1, 2, 99]).is_err());
+    }
+
+    #[test]
+    fn starter_house_spellbook_is_a_json_object() {
+        assert!(starter_house_spellbook().unwrap().is_object());
     }
 
     #[test]

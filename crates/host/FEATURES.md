@@ -79,8 +79,8 @@ The complete contracts and proof limits appear in [Architecture](../../docs/ARCH
 - `knock_authority` gates Hallway Knock claim and settle. It refuses a room or a spirit that is not this Host's own (`server.rs:1651-1665`).
 - `PresenceOpen` passes `authenticate_presence`. The operator comes from the room state, not from the wire (`server.rs:1257-1285`).
 - Chat lines take the author name from the room store identity, never from the caller (`server.rs:999-1013`).
-- `resolve_room_dir` accepts an empty request or this Host's own room directory. Only `RoutingDispatch` and `FamiliarStatus` use it (`server.rs:2067-2093`).
-- The Host reads the room spellbook and the quest report from disk (`server.rs:2097-2101,2110-2114`).
+- `resolve_room_dir` accepts an empty request or this Host's own room directory. Only `LogConversation` uses it.
+- The Host reads the quest report from disk. It reads spellbook pages from PostgreSQL.
 - `LogConversation` writes the transcript, the source ledger, and a debug provenance line (`server.rs:2131-2235`).
 - `LogConversation` refuses a foreign `room_dir` before writing. The adapter reports the refusal instead of treating it as a capture.
 - Routing, lineage, and shell answers are typed events: `RoutingResultEvent`, `LineageResultEvent`, and `ShellResultEvent` (`crates/protocol/src/host.rs:48-61`).
@@ -135,6 +135,9 @@ Not re-verified at a6ab453; `crates/host` (`server.rs`, `receipt.rs`) would deci
 - The ledger keeps 64 entries and drops the oldest. A key reused for another operation or another body is a conflict (`presence.rs:373-419`).
 - The server loads a live session from PostgreSQL and adopts it. The ledger and the close are written back to the store (`presence.rs:223-234`; `server.rs:1129-1136,1156-1162,1394`).
 - Capabilities come from Host configuration: `RoomState` always, `Akasha` when enabled, and `Receipts` when enabled (`presence.rs:421-436`).
+- The open request carries the operator card in its `continuity` group. The card holds at most 40 rows and 4096 characters (`server/context_session/materials.rs`).
+- The card reader is the operator key of the Host configuration. A Host with no operator key sends no card.
+- A frame rotation selects the card again (`server/context_session/identity.rs`).
 
 Not re-verified at a6ab453; `adapters/omp` would decide:
 
@@ -232,20 +235,30 @@ Not re-verified at a6ab453; `crates/host` (`insula.rs`) would decide:
 - Dispatch only validates and packages. Every receipt carries `executed: false`, so a refused request still gets a receipt (`dispatch.rs:176-177`).
 - An accepted packet is `spawnPacket { tool: "task", args }`. The Host never spawns a worker (`dispatch.rs:440-456`).
 - The gates: a known lane, a task, one or more complete lesson bodies, acceptance where required, an exact target for editing lanes, and allowed context modes (`dispatch.rs:151-160,183-233`).
-- The shared page lives at `<parent of room_dir>/house/familiars/spellbook.json`.
-- The room page lives at `<room_dir>/familiars/spellbook.json`. Each layer accepts `litters.json` when its primary file is absent.
-- Missing room keys inherit shared values. Local keys replace whole values, including empty strings and lists.
+- Table `spellbook_pages` holds one page for each scope (migration 0049). Scope `house` is the shared page. Every other scope is a room key.
+- A page is one JSON document with the old `spellbook.json` shape. A page that does not parse refuses with its scope.
+- The requester's room `R` is this Host's configured room. Callers do not name it.
+- Page keys come from the `R` page over the `house` page. Missing keys inherit shared values. Local keys replace whole values, including empty strings and lists.
 - Explicit null fields receive a refusal instead of silently inheriting shared values.
-- Familiar entries replace shared entries with the same `id`. New ids remain available alongside inherited entries.
+- Familiar precedence by `id`, highest first: `R`, then `house`, then every other room. An `R` entry replaces the `house` entry with the same `id` whole.
 - Duplicate ids within a page receive a refusal before overlay can hide them.
-- The effective book binds familiars and aliases. `ompAgent` and `modelRole` must appear together.
-- An explicit empty familiar list clears inherited familiars. It is valid.
-- Malformed or unreadable files refuse the book and identify their source.
-- The Host adds the effective `guide` to its prepared `room-context` block.
+- The `R` and `house` book validates as one book. Its errors refuse the whole book. `ompAgent` and `modelRole` must appear together.
+- An explicit empty familiar list clears inherited `house` familiars. It is valid.
+- Another room's familiar joins only when `R` and `house` do not define its `id`. Each one validates alone. An invalid one is left out with a warning that names its scope. It never refuses the `R` book.
+- Two or more other rooms that define one `id` make it contested. The book leaves it out and names every scope.
+- A lookup key that `R` and `house` own always wins. Two or more other familiars that claim one key make that key contested. Their other keys still work.
+- Dispatch by a contested id or key is refused: "Define it in this room or in the house to choose."
+- Each familiar in a receipt carries `origin`, the scope that defined it. A page that names `origin` is refused.
+- The dispatch receipt's `spellbook` identity comes from the familiar's origin page over the `house` page.
+- No database or a failed query refuses the book with "Spellbook unavailable: …".
+- The Host adds the effective `guide` to its prepared `room-context` block. A refused or unavailable book adds a warning. A missing book adds nothing.
 - A local empty guide removes the shared guide. Organ authorization remains unchanged.
-- `familiar_dispatch` sets the lane from the spellbook. Only `house_dispatch` reaches it; no socket command calls it directly (`routing.rs:230-279`).
-- The socket serves `RoutingStatus`, `RoutingDispatch`, and `FamiliarStatus` (`server.rs:854-882`).
-- `familiar_status` reports ordered `sources` entries with `layer`, `path`, and `alias`.
+- `familiar_dispatch` sets the lane from the spellbook. Only `house_dispatch` reaches it; no socket command calls it directly.
+- The socket serves `RoutingStatus`, `RoutingDispatch`, `FamiliarStatus`, and `SpellbookWrite`.
+- `familiar_status` reports ordered `sources` entries with `layer` (`room`, `house`, or `other`) and `scope`. It also reports `warnings`, `contested`, and `pages`: the stored `house` and `R` pages, or null.
+- `SpellbookWrite { scope, page }` replaces one page whole in one transaction. Only scope `R` or `house` is allowed.
+- An `R` page must validate over the `house` page. A `house` page must validate alone. It must not break a room page that validates over the current `house` page. The refusal names each room that would break.
+- The write receipt carries `ok`, `scope`, `errors`, and the familiar status for `R` after the write.
 
 Not re-verified at a6ab453; `crates/host` (`routing.rs`, `dispatch.rs`) would decide:
 

@@ -9,8 +9,8 @@
 use akasha::migrations::run_migrations;
 use akasha::{Config, EmbeddingMode, RecallResult, canon_read, canon_write, recall, remember};
 use hearth::{
-    CanonAttribution, CanonReadRequest, CanonWriteRequest, MemoryScope, OperatorKey, RecallRequest,
-    RememberMemoryDetails, RememberRequest, RoomKey,
+    CanonAttribution, CanonReadRequest, CanonScope, CanonWriteRequest, MemoryScope, OperatorKey,
+    RecallRequest, RememberMemoryDetails, RememberRequest, RoomKey,
 };
 use sqlx::{
     PgPool,
@@ -254,13 +254,15 @@ async fn seed_memories(db: &Isolated) -> TestResult<Seeded> {
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
 async fn empty_operators_recall_exactly_what_the_pre_axis_house_recalled() -> TestResult {
     let db = Isolated::bare("operator_baseline").await?;
-    // Recall reads the amendment table of schema 47, so the baseline carries it
-    // and only the operator axis differs between the two reads.
+    // Seed historical rows before 0035, then bring canon to its required schema
+    // before either public recall. Current canon SQL cannot run before 0048.
     db.apply_files(|version| version < 35 || version == 47)
         .await?;
     for marker in ["first-entry", "second-entry", "third-entry"] {
         db.pre_axis_memory(marker).await?;
     }
+    db.apply_files(|version| version == 35 || version == 48)
+        .await?;
     let before = db.recall_as(None, TERM).await?;
     assert!(
         before.retrieval_candidates.len() == 3,
@@ -268,7 +270,6 @@ async fn empty_operators_recall_exactly_what_the_pre_axis_house_recalled() -> Te
         before.retrieval_candidates
     );
 
-    db.apply_files(|version| version == 35).await?;
     let operators: i64 = sqlx::query_scalar("SELECT count(*) FROM operators")
         .fetch_one(&db.pool)
         .await?;
@@ -622,15 +623,14 @@ async fn empty_registry_keeps_owned_rows_private() -> TestResult {
 }
 
 // ---------------------------------------------------------------------------
-// Attack 8: canon and named entities are not memories rows.
+// Attack 8: unowned canon stays shared; private subject canon does not.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
-async fn attack_canon_lookup_and_named_entities_ignore_the_operator_axis() -> TestResult {
+async fn attack_canon_shares_unowned_rows_but_filters_private_subject_rows() -> TestResult {
     let db = Isolated::migrated("operator_canon").await?;
     db.seed_company().await?;
-    seed_memories(&db).await?;
     let written = canon_write(
         &db.pool,
         CanonWriteRequest::new(
@@ -648,18 +648,29 @@ async fn attack_canon_lookup_and_named_entities_ignore_the_operator_axis() -> Te
         )?,
     )
     .await?;
-
-    let axis_columns: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM information_schema.columns
-         WHERE table_schema = current_schema() AND table_name = 'named_entities'
-           AND column_name IN ('operator', 'scope')",
+    let private = canon_write(
+        &db.pool,
+        CanonWriteRequest::new(
+            ROOM.into(),
+            "Lighthouse Logbook".into(),
+            "preference".into(),
+            "The lighthouse keeper's private logbook stays sealed.".into(),
+            vec![],
+            None,
+            false,
+            vec![],
+            None,
+            vec![],
+            CanonAttribution::new("crisol".into(), "operator-axis-proof".into())?,
+        )?
+        .with_axis(
+            Some(OperatorKey::new("staff")?),
+            Some(OperatorKey::new("staff")?),
+            Some(CanonScope::Private),
+            None,
+        )?,
     )
-    .fetch_one(&db.pool)
     .await?;
-    assert_eq!(
-        axis_columns, 0,
-        "named_entities gained operator-axis columns"
-    );
 
     let baseline = db.recall_as(None, TERM).await?.canon_matches;
     assert!(
@@ -669,12 +680,28 @@ async fn attack_canon_lookup_and_named_entities_ignore_the_operator_axis() -> Te
         "control: canon lookup must find entity {}: {baseline:#?}",
         written.entity_id
     );
-    for reader in ["owner", "staff", "peer", "ghost"] {
+    for reader in ["owner", "peer", "ghost"] {
         let canon = db.recall_as(Some(reader), TERM).await?.canon_matches;
         assert_eq!(
             canon, baseline,
             "{reader}'s canon matches differ from the operator-less reader's"
         );
+    }
+    let staff = db.recall_as(Some("staff"), TERM).await?.canon_matches;
+    assert!(
+        staff
+            .iter()
+            .any(|entry| entry["entry"]["id"].as_i64() == private.entity_id.parse::<i64>().ok()),
+        "control: the subject must recall its private canon"
+    );
+    for reader in [None, Some("owner"), Some("peer"), Some("ghost")] {
+        let hidden = canon_read(
+            &db.pool,
+            CanonReadRequest::new(ROOM.into(), Some(private.entity_id.parse()?), None, true)?
+                .with_reader(reader.map(OperatorKey::new).transpose()?),
+        )
+        .await?;
+        assert!(hidden.entities.is_empty(), "{reader:?} read private canon");
     }
     let read = canon_read(
         &db.pool,
@@ -687,7 +714,7 @@ async fn attack_canon_lookup_and_named_entities_ignore_the_operator_axis() -> Te
             .map(|entity| entity.entity_id.as_str())
             .collect::<Vec<_>>(),
         vec![written.entity_id.as_str()],
-        "canon_read takes no operator and must return the entity unchanged"
+        "unowned canon remains visible without a reader"
     );
     db.close().await
 }

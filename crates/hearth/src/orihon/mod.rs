@@ -21,6 +21,9 @@ pub enum Mode {
 pub struct RecordingState {
     pub mode: Mode,
     pub generation: String,
+    /// First room sequence eligible for this generation's turn frontier.
+    #[serde(default)]
+    pub generation_start_seq: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<FolderSettings>,
 }
@@ -61,8 +64,6 @@ pub enum FolderBackend {
     Local,
     Hosted,
 }
-
-pub const HOSTED_FOLDER_MODEL: &str = "anthropic/claude-sonnet-5-5";
 
 /// Non-secret launch identity. OMP alone reads provider credentials.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

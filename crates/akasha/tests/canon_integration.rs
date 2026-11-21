@@ -35,6 +35,12 @@ const BEFORE_CANON_AUTHORITY: &[&str] = &[
     migration!("0014_lesson_threads.sql"),
 ];
 const CANON_AUTHORITY: &str = migration!("0015_canon_authority.sql");
+const AFTER_CANON_AUTHORITY: &[&str] = &[
+    migration!("0028_room_settings.sql"),
+    migration!("0035_operator_axis.sql"),
+    migration!("0047_memory_amendments.sql"),
+    migration!("0048_operator_canon.sql"),
+];
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -67,6 +73,9 @@ async fn isolated_schema() -> TestResult<(String, String, PgPool)> {
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .connect_with(options)
+        .await?;
+    sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .execute(&pool)
         .await?;
     sqlx::query(&format!("CREATE SCHEMA {schema}"))
         .execute(&pool)
@@ -118,6 +127,9 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
         migrated_authority, "active",
         "migration must retain existing authority as active"
     );
+    for migration in AFTER_CANON_AUTHORITY {
+        sqlx::raw_sql(migration).execute(&pool).await?;
+    }
 
     let receipt = canon_write(
         &pool,

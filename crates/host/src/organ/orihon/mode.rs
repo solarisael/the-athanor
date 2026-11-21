@@ -1,4 +1,4 @@
-use super::{database_error, invalid};
+use super::{database_error, invalid, storage_error};
 use crate::HostConfig;
 use hearth::orihon::{FolderBackend, FolderSettings, Mode, RecordingDefaults, RecordingState};
 use protocol::ProtocolErrorBody;
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Transaction, types::Json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::fs::{self, File, OpenOptions};
 
 pub(super) fn session_key(spirit: &str, session: &str) -> String {
@@ -25,10 +25,11 @@ fn settings_key(prefix: &str, spirit: &str, session: &str) -> String {
     format!("{prefix}_{:x}", hash.finalize())
 }
 
-fn initial_state(defaults: &RecordingDefaults) -> RecordingState {
+fn initial_state(defaults: &RecordingDefaults, generation_start_seq: i64) -> RecordingState {
     RecordingState {
         mode: defaults.mode,
         generation: uuid::Uuid::new_v4().to_string(),
+        generation_start_seq,
         folder: defaults.folder.clone(),
     }
 }
@@ -41,14 +42,17 @@ pub(super) fn defaults(state: &RecordingState) -> RecordingDefaults {
 }
 
 pub(super) fn validate(state: RecordingState) -> Result<RecordingState, ProtocolErrorBody> {
-    if uuid::Uuid::parse_str(&state.generation).is_err() {
+    if state.generation_start_seq < 0 || uuid::Uuid::parse_str(&state.generation).is_err() {
         return Err(invalid("invalid persisted Orihon generation"));
     }
     validate_policy(state.mode, state.folder.as_ref())?;
     Ok(state)
 }
 
-fn validate_policy(mode: Mode, folder: Option<&FolderSettings>) -> Result<(), ProtocolErrorBody> {
+pub(super) fn validate_policy(
+    mode: Mode,
+    folder: Option<&FolderSettings>,
+) -> Result<(), ProtocolErrorBody> {
     if mode == Mode::Fold && folder.is_none() {
         return Err(invalid("fold mode requires a folder configuration"));
     }
@@ -91,6 +95,18 @@ pub(super) async fn lock_pg<'a>(
         .await
         .map_err(database_error)?;
     Ok(transaction)
+}
+
+pub(super) async fn generation_start_pg(
+    transaction: &mut Transaction<'_, Postgres>,
+    room: &str,
+) -> Result<i64, ProtocolErrorBody> {
+    let next_seq = sqlx::query_scalar("SELECT next_seq FROM orihon_cursor WHERE room=$1")
+        .bind(room)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map_err(database_error)?;
+    Ok(next_seq.unwrap_or(0))
 }
 
 pub(super) async fn load_or_initialize_pg(
@@ -142,7 +158,7 @@ pub(super) async fn load_or_initialize_pg(
     let state = match saved {
         Some(Json(state)) => validate(state)?,
         None => {
-            let state = initial_state(&defaults);
+            let state = initial_state(&defaults, generation_start_pg(transaction, room).await?);
             save_value_pg(transaction, room, &key, json!(state)).await?;
             state
         }
@@ -206,13 +222,18 @@ pub(super) fn lock_file(host: &HostConfig) -> Result<File, ProtocolErrorBody> {
     Ok(file)
 }
 
+pub(super) fn generation_start_file(host: &HostConfig) -> Result<i64, ProtocolErrorBody> {
+    let directory = host.room_dir.join(hearth::orihon::DIRECTORY);
+    origami::orihon::next_seq_file(&directory, &host.room).map_err(storage_error)
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct FileSettings {
     spirits: BTreeMap<String, SpiritSettings>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SpiritSettings {
     defaults: RecordingDefaults,
@@ -251,9 +272,7 @@ pub(super) fn load_or_initialize_file(
     let object = root
         .as_object_mut()
         .ok_or_else(|| invalid("room configuration must be an object"))?;
-    let saved = read_settings(host)?;
-    let mut changed = saved.is_none();
-    let mut settings = match saved {
+    let mut settings = match read_settings(host)? {
         Some(settings) => settings,
         None => {
             let defaults = match object.get("orihon") {
@@ -275,31 +294,18 @@ pub(super) fn load_or_initialize_file(
             settings
         }
     };
-    let entry = settings
-        .spirits
-        .entry(spirit.to_owned())
-        .or_insert_with(|| {
-            changed = true;
-            SpiritSettings {
-                defaults: RecordingDefaults::default(),
-                sessions: BTreeMap::new(),
-            }
-        });
+    let entry = settings.spirits.entry(spirit.to_owned()).or_default();
     validate_policy(entry.defaults.mode, entry.defaults.folder.as_ref())?;
     let defaults = entry.defaults.clone();
-    let state = entry
-        .sessions
-        .entry(session_key(spirit, session))
-        .or_insert_with(|| {
-            changed = true;
-            initial_state(&defaults)
-        })
-        .clone();
-    let state = validate(state)?;
-
-    if changed {
-        save_file(host, &settings)?;
-    }
+    let state = match entry.sessions.entry(session_key(spirit, session)) {
+        Entry::Occupied(session) => validate(session.get().clone())?,
+        Entry::Vacant(session) => {
+            let state = initial_state(&defaults, generation_start_file(host)?);
+            session.insert(state.clone());
+            save_file(host, &settings)?;
+            state
+        }
+    };
 
     // The dedicated file is the migration fence, even if legacy cleanup fails.
     if object.remove("orihon").is_some() {
@@ -385,4 +391,25 @@ fn file_error(error: std::io::Error) -> ProtocolErrorBody {
     )
     .retryable(true)
     .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_floor_is_zero_and_never_becomes_a_recording_default() {
+        let legacy = serde_json::from_value(json!({
+            "generation": "00000000-0000-0000-0000-000000000001", "mode": "log"
+        }))
+        .unwrap();
+        let mut state = validate(legacy).unwrap();
+        assert_eq!(state.generation_start_seq, 0);
+        state.generation_start_seq = 7;
+        let policy = defaults(&state);
+        assert!(json!(policy).get("generationStartSeq").is_none());
+        assert_eq!(initial_state(&policy, 9).generation_start_seq, 9);
+        state.generation_start_seq = -1;
+        assert!(validate(state).is_err());
+    }
 }

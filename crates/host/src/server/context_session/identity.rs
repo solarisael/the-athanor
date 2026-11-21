@@ -178,7 +178,7 @@ async fn rotate(
         1000,
     );
     let same_binding = frame.binding == authentication.binding;
-    let continuity = frame
+    let mut continuity = frame
         .continuity
         .iter()
         .filter(|material| {
@@ -189,7 +189,10 @@ async fn rotate(
                         | summoning::presence::PresenceAuthority::Memory { .. }
                 )
         })
+        .map(|material| json!(material))
         .collect::<Vec<_>>();
+    continuity.extend(materials::fetch_operator_card(state, &authentication.binding.room).await);
+
     let relationship = if same_binding {
         serde_json::to_value(&frame.relationship).map_err(|error| error.to_string())?
     } else {

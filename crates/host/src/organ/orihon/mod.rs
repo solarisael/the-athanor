@@ -1,3 +1,4 @@
+mod change;
 pub(crate) mod live;
 mod mode;
 mod navigator;
@@ -7,6 +8,7 @@ mod zoom;
 
 use super::worker_lifecycle::{self, BoundOwner};
 use crate::HostConfig;
+use change::{ModeWrite, change_mode};
 use hearth::orihon::live::{LIVE_INSTRUCTIONS, LIVE_VERSION};
 use hearth::orihon::{
     CaptureBatch, FolderSettings, Kind, Mode, ReadRequest, Record, RecordingDefaults,
@@ -56,15 +58,6 @@ pub(crate) async fn initialize_session(
     })
     .await
     .map_err(|_| invalid("Orihon session initialization did not complete"))?
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ModeRequest {
-    mode: Option<Mode>,
-    model: Option<String>,
-    backend: Option<hearth::orihon::FolderBackend>,
-    runtime: Option<hearth::orihon::FolderRuntime>,
 }
 
 /// `orihon_turn`. A live turn names its generation, frontier, stable prefix and model; a task
@@ -179,6 +172,17 @@ async fn execute(
         return Ok(result);
     }
     let pool = pool.ok_or_else(|| invalid("Orihon PostgreSQL storage is unavailable"))?;
+
+    pg_call(host, pool, meta, request, live).await
+}
+
+async fn pg_call(
+    host: &HostConfig,
+    pool: &PgPool,
+    meta: &CommandMeta,
+    request: OrganRequest,
+    live: &live::Room,
+) -> Result<Value, ProtocolErrorBody> {
     if request.operation == OrganOperation::Orihon {
         let read = decode_read(request)?;
         let receipt = origami::orihon::read_pg(pool, &host.room, read)
@@ -198,8 +202,13 @@ async fn execute(
     .await?;
     match request.operation {
         OrganOperation::OrihonMode => {
-            let (changed, effect) = change_mode(&mut state, request)?;
-            if changed {
+            let (write, effect) = change_mode(&mut state, request)?;
+
+            if write == ModeWrite::NewGeneration {
+                state.generation_start_seq =
+                    mode::generation_start_pg(&mut transaction, &host.room).await?;
+            }
+            if write != ModeWrite::Status {
                 mode::save_pg(
                     &mut transaction,
                     &host.room,
@@ -277,8 +286,12 @@ fn file_call(
         mode::load_or_initialize_file(host, spirit, writer)?;
     match request.operation {
         OrganOperation::OrihonMode => {
-            let (changed, effect) = change_mode(&mut state, request)?;
-            if changed {
+            let (write, effect) = change_mode(&mut state, request)?;
+
+            if write == ModeWrite::NewGeneration {
+                state.generation_start_seq = mode::generation_start_file(host)?;
+            }
+            if write != ModeWrite::Status {
                 mode::update_file(&mut settings, spirit, writer, &state)?;
                 mode::save_file(host, &settings)?;
                 defaults = mode::defaults(&state);
@@ -368,6 +381,7 @@ async fn turn(
         .ok_or_else(|| invalid("fold mode requires a folder configuration"))?;
     live.turn(live::TurnRequest {
         session: meta.sender_session.clone(),
+        generation_start_seq: state.generation_start_seq,
         through_source_id,
         prefix,
         model,
@@ -497,58 +511,6 @@ fn read_result(receipt: hearth::orihon::ReadReceipt) -> Result<Value, ProtocolEr
     Ok(value)
 }
 
-/// Applies a mode request. Naming a mode or a folder is an explicit change: it is saved and
-/// decides whether the session takes part in live compaction. An empty request only reads.
-fn change_mode(
-    state: &mut RecordingState,
-    request: OrganRequest,
-) -> Result<(bool, Effect), ProtocolErrorBody> {
-    let request: ModeRequest = serde_json::from_value(Value::Object(request.params))
-        .map_err(|_| invalid("Orihon mode must be off, log, or fold"))?;
-    let folder_given =
-        request.model.is_some() || request.backend.is_some() || request.runtime.is_some();
-    let explicit = request.mode.is_some() || folder_given;
-
-    if folder_given {
-        if request.mode != Some(Mode::Fold) {
-            return Err(invalid("A folder configuration requires fold mode"));
-        }
-        let backend = request.backend.unwrap_or_default();
-        let model = match request.model {
-            Some(model) => model,
-            None if backend == hearth::orihon::FolderBackend::Hosted => {
-                hearth::orihon::HOSTED_FOLDER_MODEL.to_owned()
-            }
-            None => return Err(invalid("A local folder configuration requires a model")),
-        };
-        state.folder = Some(hearth::orihon::FolderSettings {
-            model,
-            backend,
-            runtime: request.runtime,
-        });
-    }
-    if let Some(next) = request.mode {
-        if state.mode == Mode::Off && next != Mode::Off {
-            state.generation = uuid::Uuid::new_v4().to_string();
-        }
-        state.mode = next;
-    }
-    mode::validate(state.clone())?;
-    let effect = match (explicit, state.mode) {
-        (false, _) => Effect::None,
-        (true, Mode::Fold) => Effect::Join {
-            folder: state
-                .folder
-                .clone()
-                .ok_or_else(|| invalid("fold mode requires a folder configuration"))?,
-            explicit: folder_given,
-        },
-        (true, Mode::Log | Mode::Off) => Effect::Leave,
-    };
-
-    Ok((explicit, effect))
-}
-
 fn capture_batch(
     host: &HostConfig,
     mut request: OrganRequest,
@@ -598,7 +560,7 @@ fn mode_result(
     session: &str,
     live: &live::Room,
 ) -> Value {
-    json!({"ok":true,"mode":state.mode,"generation":state.generation,"folder":state.folder,
+    json!({"ok":true,"mode":state.mode,"generation":state.generation,"generationStartSeq":state.generation_start_seq,"folder":state.folder,
         "defaults": defaults, "spirit": spirit, "sourceSession": session,
         "supportedModes":["off","log","fold"],
         "instructions":LIVE_INSTRUCTIONS,"instructionsVersion":LIVE_VERSION,
@@ -633,4 +595,28 @@ fn database_error(_error: sqlx::Error) -> ProtocolErrorBody {
     ProtocolErrorBody::application("database", "Orihon database operation failed")
         .retryable(true)
         .build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hosted_mode_without_a_model_does_not_set_a_default() {
+        let mut state = RecordingState {
+            mode: Mode::Log,
+            generation: uuid::Uuid::new_v4().to_string(),
+            generation_start_seq: 0,
+            folder: None,
+        };
+        let request = serde_json::from_value(json!({
+            "operation": "orihon_mode",
+            "params": {"mode": "fold", "backend": "hosted"}
+        }))
+        .unwrap();
+
+        assert!(change_mode(&mut state, request).is_err());
+        assert_eq!(state.mode, Mode::Log);
+        assert_eq!(state.folder, None);
+    }
 }

@@ -15,8 +15,10 @@ Other open sessions retain their effective settings.
 The Host snapshots settings during attachment. Reattachment preserves the snapshot for the same spirit and session.
 New spirits default to log. Legacy room settings migrate once and preserve explicit off.
 Use `/orihon fold MODEL:TAG` to go live with a local compactor model.
-Use `/orihon fold hosted` to go live with the native Sonnet default.
-Use `/orihon fold hosted PROVIDER/MODEL` to go live with an Anthropic or Codex model.
+Use `/orihon fold hosted` to select the `@orihon_fold` model role in OMP.
+Set `modelRoles.orihon_fold` in OMP before you use this command.
+Use `/orihon fold hosted @ROLE` or `/orihon fold hosted PROVIDER/MODEL` to select a different model.
+The command saves the resolved model. Run it again after you change the role.
 Fold is live mode. The Host folds the room chat into a message tree in the background.
 Every new turn in a live session starts from the chat view instead of the old conversation. See "Live turns".
 The latest explicit fold configuration becomes the room compactor configuration.
@@ -38,6 +40,11 @@ A new generation starts at the next user page after that baseline.
 The adapter shows a notice when it creates the baseline.
 It does not import earlier pages or records from an off interval.
 An unchanged generation resumes from its existing checkpoint.
+
+The Host records `generationStartSeq` when it starts a generation. This is the next sequence number in the room book.
+Turning recording on after `off` starts a new generation. Repeating `fold` keeps the current generation and its sequence number.
+The first turn can read older recorded pages. An older source ID cannot mark progress in the new generation.
+Existing settings without `generationStartSeq` use zero until recording starts a new generation.
 
 ## Replay source
 
@@ -177,6 +184,9 @@ Advisors, `/tan` clones, and eval agents receive no view.
 
 The model tools are read-only `orihon`, `unfold`, `zoom`, and `date`.
 `orihon` accepts page, sequence, and day bounds, or a separate search query.
+To find an older fact without its ID, search with `query`. Use `turnNo` from the matching result to read the original page.
+For `orihon` and `zoom`, omit unused fields or set them to `null`. Zero identifies the first message or page.
+Use one selector per call. Do not send `name` with a message ID.
 `unfold` accepts an exact stored fold revision reference and optional source pagination.
 `zoom` opens a view line: `id` and `n` give the two lines a line was made from; `n` 1 gives the message whole; `rawOffset` pages the audit text behind a fold text.
 `zoom` with `name` opens a task child's own log. The Host returns the verified `{session, sourceSession}` references.

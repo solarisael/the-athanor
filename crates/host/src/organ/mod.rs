@@ -1,6 +1,9 @@
 mod giga;
 pub(crate) mod orihon;
 mod worker_lifecycle;
+
+#[cfg(test)]
+mod canon_tests;
 pub(crate) use giga::{GigaRoomWorker, capture as capture_giga, serve as serve_giga};
 
 use crate::HostConfig;
@@ -381,17 +384,16 @@ fn bind_identity(
         VaultRecall => put(params, "room_dir", &host.room_dir.to_string_lossy()),
         _ => {}
     }
-    // The operator axis: the Host names the reader and the writer. Lessons stay
-    // off the axis, so only a memory write carries one. Thread membership and
-    // amendments belong to memories, so a join, a leave, or an amendment is a
-    // memory write.
+    // The Host names the reader for recall, canon, and entity resolution, and
+    // the writer for canon and memories. Lessons stay off the operator axis.
+    // Thread joins, leaves, and amendments are memory writes.
     let memory_write = matches!(
         operation,
         MemoryThreadJoin | MemoryThreadLeave | MemoryAmend
     ) || (operation == Remember
         && params.get("kind").and_then(Value::as_str) == Some("memory"));
     if let Some(operator) = &host.operator
-        && (operation == Recall || memory_write)
+        && (matches!(operation, Recall | CanonRead | CanonWrite | EntityResolve) || memory_write)
     {
         put(params, "operator", operator);
     }

@@ -1,6 +1,4 @@
 use super::*;
-use origami::orihon::live::COMPACTOR_HIGH;
-use origami::orihon::live::store::Usage;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,6 +11,26 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+fn capture(
+    source_id: String,
+    parent: Option<&str>,
+    kind: Kind,
+    text: String,
+) -> hearth::orihon::CaptureRecord {
+    hearth::orihon::CaptureRecord {
+        source_id,
+        parent_user_id: parent.map(str::to_owned),
+        kind,
+        speaker: "Operator".into(),
+        text,
+        said_at: "2030-01-01T00:00:00Z".into(),
+        timestamp_observed: false,
+        redacted: false,
+        fold_text: None,
+        children: None,
+    }
+}
 
 struct TestBook(PathBuf);
 
@@ -31,17 +49,13 @@ impl TestBook {
     fn append(&self, count: usize, bytes: usize) {
         for start in (0..count).step_by(MAX_BATCH_RECORDS) {
             let records = (start..count.min(start + MAX_BATCH_RECORDS))
-                .map(|index| hearth::orihon::CaptureRecord {
-                    source_id: format!("user-{index}"),
-                    parent_user_id: None,
-                    kind: Kind::User,
-                    speaker: "Operator".into(),
-                    text: format!("source-{index}-{}", "x".repeat(bytes)),
-                    said_at: "2030-01-01T00:00:00Z".into(),
-                    timestamp_observed: false,
-                    redacted: false,
-                    fold_text: None,
-                    children: None,
+                .map(|index| {
+                    capture(
+                        format!("user-{index}"),
+                        None,
+                        Kind::User,
+                        format!("source-{index}-{}", "x".repeat(bytes)),
+                    )
                 })
                 .collect();
             origami::orihon::append_file(
@@ -56,6 +70,31 @@ impl TestBook {
             )
             .expect("append test records");
         }
+    }
+
+    /// Accepts one page of a live harness session: a user input and the talk records it
+    /// parents. Returns the seq of the page's last record.
+    fn page(&self, session: &str, input: &str, replies: &[&str]) -> i64 {
+        let user = capture(input.into(), None, Kind::User, format!("said {input}"));
+        let replies = replies.iter().map(|reply| {
+            let text = format!("said {reply}");
+            capture((*reply).into(), Some(input), Kind::Talk, text)
+        });
+        origami::orihon::append_file(
+            &self.0,
+            "room",
+            "writer",
+            hearth::orihon::CaptureBatch {
+                harness: HARNESS.into(),
+                source_session: session.into(),
+                records: std::iter::once(user).chain(replies).collect(),
+            },
+        )
+        .expect("append test page")
+        .accepted_records
+        .last()
+        .expect("the page was accepted")
+        .seq
     }
 }
 
@@ -177,249 +216,70 @@ async fn close_model(cancel: CancellationToken, task: JoinHandle<()>) {
     task.await.expect("stop controlled model");
 }
 
-fn accepted_job(key: NodeKey) -> Job {
-    Job {
-        id: None,
-        key,
-        outcome: Outcome::Accepted,
-        backend: "local".into(),
-        provider: "ollama".into(),
-        model: "test-model".into(),
-        cache_scope: "test-scope".into(),
-        prefix_digest: "a".repeat(64),
-        context_digest: "b".repeat(64),
-        context_lines: 0,
-        context_bytes: 0,
-        input_bytes: 1,
-        attempts: Vec::new(),
-        usage: Usage::default(),
-        cost_usd: None,
-        cost_reason: None,
-        error: None,
-        started_at: "2030-01-01T00:00:00Z".into(),
-        finished_at: "2030-01-01T00:00:01Z".into(),
-    }
-}
-
 #[tokio::test]
-async fn ready_model_merges_precede_leaf_backlog_even_after_verbatim_joins() {
-    for built in [4, 32] {
-        let book = TestBook::new();
-        book.append(built + 9, 700);
-        let mut owner = open_owner(&book).await;
-        owner.boundary(Vec::new()).await.expect("ingest records");
-
-        for unit in 0..built as u64 {
-            let source = owner
-                .live
-                .leaf_source(unit)
-                .await
-                .expect("read leaf source");
-            owner
-                .put(
-                    NodeKey::leaf(unit),
-                    "v".repeat(if built == 4 { 200 } else { 400 }),
-                    Method::Verbatim,
-                    source.unit.digest,
-                    None,
-                )
-                .await
-                .expect("store short leaf");
-        }
-        owner.joins.sort();
-        owner.joins.dedup();
-        assert_eq!(
-            owner.joins.len(),
-            if built == 4 { 2 } else { 0 },
-            "only sibling pairs within one line join without a model"
-        );
-
-        let (endpoint, _requests, model_cancel, model_task) = model_server().await;
-        let prefix = Prefix {
-            system: Vec::new(),
-            tools: Vec::new(),
-        };
-        let mut config = FolderConfig::local("test-model");
-        config.endpoint = endpoint.parse().expect("controlled model endpoint");
-        let engine = Engine::open(config, prefix.clone())
-            .await
-            .expect("open controlled engine");
-        let settings = folder();
-        owner.config = LiveConfig {
-            folder: Some(settings.clone()),
-            prefix_digest: Some(prefix.digest()),
-        };
-        owner.engine = Some(Slot {
-            engine,
-            folder: settings,
-            prefix_digest: prefix.digest(),
-        });
-
-        let mut actor = Actor {
-            room: Room::default(),
-            name: "room".into(),
-            store: Store::File(book.path().to_path_buf()),
-            owner: Some(owner),
-            participants: BTreeSet::from(["session".to_owned()]),
-            jobs: tokio::task::JoinSet::new(),
-            cancel: CancellationToken::new(),
-            shutdown: CancellationToken::new(),
-            error: None,
-        };
-        actor.advance().await;
-
-        let owner = actor.owner.as_ref().expect("actor keeps the room owner");
-        let ready_merge = NodeKey {
-            level: if built == 4 { 2 } else { 1 },
-            index: 0,
-        };
-        assert!(
-            owner.running.contains(&ready_merge),
-            "a model-ready parent must start before remaining leaves drain"
-        );
-        assert!(owner.pending.iter().any(|unit| *unit >= 4));
-        if built == 32 {
-            assert!(!owner.merges.is_empty(), "merge backlog remains");
-            assert!(
-                owner.running.iter().any(|key| key.level == 0),
-                "bounded leaves must progress while merges remain ready"
-            );
-        }
-
-        actor.jobs.abort_all();
-        while actor.jobs.join_next().await.is_some() {}
-        actor.pause().await;
-        close_model(model_cancel, model_task).await;
-    }
-}
-
-#[tokio::test]
-async fn completed_merge_updates_saved_views_and_restart_keeps_exact_source() {
+async fn eviction_removes_only_view_lines_and_never_starts_parent_work() {
     let book = TestBook::new();
-    book.append(256, 700);
+    book.append(310, 430);
     let mut owner = open_owner(&book).await;
     owner.boundary(Vec::new()).await.expect("ingest records");
-
-    for unit in 0..owner.units {
-        let source = owner
-            .live
-            .leaf_source(unit)
-            .await
-            .expect("read leaf source");
-        let text = if unit < 2 {
-            "x".repeat(MODEL_LINE_CEILING)
-        } else {
-            format!("line-{unit}-{}", "x".repeat(490))
-        };
-        owner
-            .live
-            .put_node(
-                NodeKey::leaf(unit),
-                text.clone(),
-                Method::Model,
-                source.unit.digest,
-                Some(&accepted_job(NodeKey::leaf(unit))),
-            )
-            .await
-            .expect("store leaf");
-        owner.sizes.insert(NodeKey::leaf(unit), text.len());
-        owner.pending.remove(&unit);
-    }
-
-    let missing = NodeKey { level: 1, index: 0 };
-    for level in 1..=8 {
-        for index in 0..(256_u64 >> level) {
-            let key = NodeKey { level, index };
-            if key == missing || (key.first() <= missing.first() && key.end() >= missing.end()) {
-                continue;
-            }
-            let text = format!("node-{level}-{index}-{}", "m".repeat(490));
-            let (_, _, _, _, digest) = owner.halves(key).await.expect("read built halves");
-            owner
-                .live
-                .put_node(key, text.clone(), Method::Joined, digest, None)
-                .await
-                .expect("store built parent");
-            owner.sizes.insert(key, text.len());
-        }
-    }
-    owner.maintain_views().await.expect("save pre-merge views");
-    let before = owner.compactor.clone();
-    let context = owner
-        .context(owner.units)
-        .await
-        .expect("render compactor context");
-    assert!(
-        context.bytes > COMPACTOR_HIGH,
-        "the missing merge must hold the compactor above its budget: {}",
-        context.bytes
+    assert_eq!(
+        (owner.units, owner.pending.len()),
+        (310, 0),
+        "every source fits verbatim"
     );
-    assert_ne!(before.lines.first(), Some(&missing));
 
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    owner.waiters.push(Waiter {
-        end: owner.units,
-        through_seq: Some(255),
-        started: Instant::now(),
-        deadline: Instant::now() + Duration::from_secs(30),
-        reply: ready_tx,
-        prefix_digest: "a".repeat(64),
-        prefix_changed: false,
-        model: TurnModel {
-            provider: "ollama".into(),
-            id: "test-model".into(),
-        },
+    let (endpoint, requests, model_cancel, model_task) = model_server().await;
+    let prefix = Prefix {
+        system: Vec::new(),
+        tools: Vec::new(),
+    };
+    let mut config = FolderConfig::local("test-model");
+    config.endpoint = endpoint.parse().expect("controlled model endpoint");
+    let engine = Engine::open(config, prefix.clone())
+        .await
+        .expect("open controlled engine");
+    let settings = folder();
+    owner.config = LiveConfig {
+        folder: Some(settings.clone()),
+        prefix_digest: Some(prefix.digest()),
+    };
+    owner.engine = Some(Slot {
+        engine,
+        folder: settings,
+        prefix_digest: prefix.digest(),
     });
-    let (_, _, _, _, source_digest) = owner.halves(missing).await.expect("read completed halves");
+
+    let mut jobs = JoinSet::new();
     owner
-        .finish(Finished {
-            key: missing,
-            source_digest,
-            completion: Some(Completion {
-                text: Some("merged summary".into()),
-                job: accepted_job(missing),
-            }),
-        })
+        .dispatch(&mut jobs, &CancellationToken::new())
         .await
-        .expect("store completed merge");
-    owner
-        .dispatch(&mut tokio::task::JoinSet::new(), &CancellationToken::new())
-        .await
-        .expect("refresh views after completed work without another boundary");
-    owner.answer().await;
-    let answer = ready_rx
-        .await
-        .expect("ready turn response")
-        .expect("ready turn");
-    assert_eq!(answer["ready"], true);
-    assert_eq!(answer["chat"]["throughSeq"], 255);
-    assert_eq!(owner.compactor.lines.first(), Some(&missing));
-    let context = owner
-        .context(owner.units)
-        .await
-        .expect("updated compactor context");
-    assert!(
-        context.bytes <= COMPACTOR_HIGH,
-        "updated context: {}",
-        context.bytes
+        .expect("dispatch after ingest");
+    assert!(jobs.is_empty(), "short messages must not start parent jobs");
+    assert_eq!(requests.load(Ordering::Relaxed), 0);
+
+    let keys = owner.chat.cut(owner.units, &owner.sizes).expect("cut view");
+    let first = keys.first().expect("view has recent records").index;
+    assert!(first > 0, "crossing the high watermark must evict the head");
+    assert_eq!(keys.last(), Some(&NodeKey::leaf(309)));
+    assert!(keys.iter().all(|key| key.level == 0));
+    let rendered = owner.render(&keys).await.expect("render chat");
+    assert!(rendered.bytes <= tree::CHAT_LOW + tree::CHAT_OPEN.len() + tree::CHAT_CLOSE.len());
+    assert!(owner.compactor.bytes(&owner.sizes) <= tree::COMPACTOR_LOW);
+    println!(
+        "retained {first}..310; {} rendered bytes; zero parent jobs",
+        rendered.bytes
     );
 
     let expected_chat = owner.chat.clone();
-    let expected_compactor = owner.compactor.clone();
     drop(owner);
-
-    let (reopened, snapshot) = Live::open(Store::File(book.path().to_path_buf()), "room")
-        .await
-        .expect("reopen test room")
-        .expect("reopen room lock");
-    assert_eq!(snapshot.chat, Some(expected_chat));
-    assert_eq!(snapshot.compactor, Some(expected_compactor));
+    let reopened = open_owner(&book).await;
+    assert_eq!(reopened.chat, expected_chat);
     let (_, original) = store::read_unit(&Store::File(book.path().to_path_buf()), "room", 0)
         .await
-        .expect("read original source after restart")
-        .expect("original source exists after restart");
-    assert_eq!(original.text, format!("source-0-{}", "x".repeat(700)));
-    drop(reopened);
+        .expect("read evicted original")
+        .expect("source survives view eviction");
+    assert_eq!(original.text, format!("source-0-{}", "x".repeat(430)));
+    close_model(model_cancel, model_task).await;
 }
 
 struct IdleRoom {
@@ -644,4 +504,148 @@ async fn idle_retry_stops_after_leave_registration_loss_or_cancellation() {
         );
         fixture.close().await;
     }
+}
+
+async fn fold_owner(book: &TestBook) -> Owner {
+    let mut owner = open_owner(book).await;
+    owner.config.folder = Some(folder());
+    owner
+}
+
+/// Places one turn of session `live`: the seq its view runs through and the view's text, or
+/// the refusal code.
+async fn place(
+    owner: &mut Owner,
+    through: Option<&str>,
+    generation_start_seq: i64,
+) -> Result<(Option<i64>, String), String> {
+    let now = Instant::now();
+    let request = TurnRequest {
+        session: "live".into(),
+        through_source_id: through.map(str::to_owned),
+        generation_start_seq,
+        prefix: Prefix {
+            system: Vec::new(),
+            tools: Vec::new(),
+        },
+        model: TurnModel {
+            provider: "test".into(),
+            id: "test-model".into(),
+        },
+        folder: folder(),
+        started: now,
+        deadline: now,
+    };
+    let accepted = owner
+        .begin_turn(&request, Vec::new())
+        .await
+        .map_err(|error| error.code)?;
+    let keys = owner
+        .chat
+        .cut(accepted.end, &owner.sizes)
+        .expect("short records are built at ingest");
+    let view = owner.render(&keys).await.expect("render the turn view");
+    Ok((accepted.through_seq, view.text()))
+}
+
+#[tokio::test]
+async fn the_first_turn_of_a_generation_keeps_older_pages_before_its_new_input() {
+    let book = TestBook::new();
+    book.page("live", "old-a", &["old-a-reply"]);
+    let start = book.page("live", "old-b", &[]) + 1;
+    let before = book.page("peer", "peer-a", &["peer-a-reply"]);
+    book.page("live", "new-a", &["new-a-reply"]);
+    let mut owner = fold_owner(&book).await;
+
+    let (through_seq, view) = place(&mut owner, None, start)
+        .await
+        .expect("older pages of the session do not make its first turn stale");
+    assert_eq!(through_seq, Some(before));
+    for kept in ["old-a", "old-a-reply", "old-b", "peer-a", "peer-a-reply"] {
+        assert!(view.contains(&format!("said {kept}\n")), "{kept} stays");
+    }
+    assert!(!view.contains("said new-a"), "the new input is not history");
+}
+
+#[tokio::test]
+async fn a_first_input_at_the_room_start_has_no_history() {
+    let book = TestBook::new();
+    book.page("live", "new-a", &["new-a-reply"]);
+    let mut owner = fold_owner(&book).await;
+
+    let (through_seq, view) = place(&mut owner, None, 0)
+        .await
+        .expect("the room's first turn");
+    assert_eq!(through_seq, None);
+    assert!(!view.contains("said new-a"));
+}
+
+#[tokio::test]
+async fn a_generation_without_records_of_its_session_is_cut_at_the_ingested_room() {
+    let book = TestBook::new();
+    book.page("live", "old-a", &["old-a-reply"]);
+    let start = book.page("live", "old-b", &[]) + 1;
+    let last = book.page("peer", "peer-a", &[]);
+    let mut owner = fold_owner(&book).await;
+
+    let (through_seq, view) = place(&mut owner, None, start)
+        .await
+        .expect("a turn before the session's next record");
+    assert_eq!(through_seq, Some(last));
+    for kept in ["old-a", "old-a-reply", "old-b", "peer-a"] {
+        assert!(view.contains(&format!("said {kept}\n")), "{kept} stays");
+    }
+}
+
+#[tokio::test]
+async fn more_than_one_new_input_after_the_frontier_is_stale() {
+    let book = TestBook::new();
+    let start = book.page("live", "old-a", &[]) + 1;
+    book.page("live", "new-a", &["new-a-reply"]);
+    book.page("live", "new-b", &[]);
+    book.page("live", "new-c", &[]);
+    let mut owner = fold_owner(&book).await;
+
+    for through in [None, Some("new-a-reply")] {
+        assert_eq!(
+            place(&mut owner, through, start).await.unwrap_err(),
+            "orihon_boundary_stale",
+            "through {through:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_named_source_is_an_accepted_record_of_the_current_generation() {
+    let book = TestBook::new();
+    let start = book.page("live", "old-a", &["old-a-reply"]) + 1;
+    book.page("peer", "peer-a", &[]);
+    let named = book.page("live", "new-a", &["new-a-reply"]);
+    let mut owner = fold_owner(&book).await;
+
+    // Another session's record is not this session's source.
+    for absent in ["absent", "peer-a"] {
+        assert_eq!(
+            place(&mut owner, Some(absent), start).await.unwrap_err(),
+            "orihon_boundary_missing",
+            "through {absent}"
+        );
+    }
+    // One new input follows the older source, yet an earlier generation accepted it.
+    assert_eq!(
+        place(&mut owner, Some("old-a-reply"), start)
+            .await
+            .unwrap_err(),
+        "orihon_boundary_stale"
+    );
+
+    book.page("live", "new-b", &[]);
+    let (through_seq, view) = place(&mut owner, Some("new-a-reply"), start)
+        .await
+        .expect("a source of the current generation");
+    assert_eq!(through_seq, Some(named));
+    for kept in ["old-a", "old-a-reply", "peer-a", "new-a", "new-a-reply"] {
+        assert!(view.contains(&format!("said {kept}\n")), "{kept} stays");
+    }
+    assert!(!view.contains("said new-b"), "the new input is not history");
 }

@@ -1,0 +1,664 @@
+{
+  "version": 1,
+  "bubbles": {
+    "organ:chat": {
+      "x": 211,
+      "y": -102,
+      "r": 196,
+      "members": {
+        "command:athanor-chat": [
+          0.179,
+          0
+        ],
+        "endpoint:host//athanor/v1/chat/say": [
+          -0.228,
+          0.209
+        ],
+        "endpoint:host//athanor/v1/chat/snapshot": [
+          0.035,
+          -0.398
+        ],
+        "file:chat-drafts.json": [
+          0.288,
+          0.376
+        ],
+        "file:chat.json": [
+          -0.528,
+          -0.093
+        ],
+        "module:crates/host/src/chat.rs": [
+          0.501,
+          -0.318
+        ],
+        "module:adapters/omp/house-proof/chat.ts": [
+          -0.167,
+          0.623
+        ],
+        "module:gui-prototype/chat.js": [
+          -0.319,
+          -0.615
+        ],
+        "module:crates/host/src/lifecycle.rs": [
+          0.693,
+          0.253
+        ],
+        "module:crates/host/src/surface.rs": [
+          -0.721,
+          0.298
+        ]
+      }
+    },
+    "organ:restart": {
+      "x": 841,
+      "y": 63,
+      "r": 301,
+      "members": {
+        "file:omp-keeper.json": [
+          0.123,
+          0
+        ],
+        "file:omp-keeper.lock": [
+          -0.158,
+          0.144
+        ],
+        "file:restart-secrets": [
+          0.024,
+          -0.275
+        ],
+        "module:crates/omp-keeper/src/decide.rs": [
+          0.199,
+          0.259
+        ],
+        "module:crates/omp-keeper/src/keeper.rs": [
+          -0.365,
+          -0.064
+        ],
+        "module:crates/omp-keeper/src/protocol.rs": [
+          0.345,
+          -0.22
+        ],
+        "module:crates/host/src/portable/restart.rs": [
+          -0.116,
+          0.43
+        ],
+        "module:crates/protocol/src/restart": [
+          -0.22,
+          -0.424
+        ],
+        "module:adapters/omp/house-proof/restart-door.ts": [
+          0.478,
+          0.175
+        ],
+        "module:crates/akasha/src/restart": [
+          -0.497,
+          0.205
+        ],
+        "operation:native/restart_claim": [
+          0.24,
+          -0.512
+        ],
+        "operation:native/restart_request": [
+          0.177,
+          0.565
+        ],
+        "operation:native/restart_status": [
+          -0.534,
+          -0.309
+        ],
+        "operation:native/restart_transition": [
+          0.626,
+          -0.138
+        ],
+        "operation:native/restart_verify": [
+          -0.382,
+          0.544
+        ],
+        "store:restart.intent_events": [
+          -0.088,
+          -0.682
+        ],
+        "store:restart.intent_instances": [
+          0.542,
+          0.457
+        ],
+        "store:restart.intents": [
+          -0.73,
+          0.03
+        ],
+        "store:restart.principal_capabilities": [
+          0.532,
+          -0.53
+        ],
+        "store:restart.successor_proofs": [
+          -0.036,
+          0.77
+        ],
+        "tool:request_restart": [
+          -0.506,
+          -0.607
+        ]
+      }
+    },
+    "organ:worker-lifecycle": {
+      "x": 1990,
+      "y": -105,
+      "r": 239,
+      "members": {
+        "file:journal.jsonl": [
+          0.141,
+          0
+        ],
+        "module:crates/hearth/src/worker_lifecycle/familiar.rs": [
+          -0.181,
+          0.165
+        ],
+        "module:crates/hearth/src/worker_lifecycle": [
+          0.028,
+          -0.315
+        ],
+        "module:adapters/omp/house-proof/worker-lifecycle.ts": [
+          0.228,
+          0.297
+        ],
+        "module:crates/host/src/organ/worker_lifecycle.rs": [
+          -0.418,
+          -0.074
+        ],
+        "module:crates/akasha/src/worker_lifecycle": [
+          0.396,
+          -0.252
+        ],
+        "operation:native/worker_lifecycle": [
+          -0.132,
+          0.492
+        ],
+        "store:worker_lifecycle.books": [
+          -0.252,
+          -0.486
+        ],
+        "store:worker_lifecycle.dispositions": [
+          0.548,
+          0.2
+        ],
+        "store:worker_lifecycle.entries": [
+          -0.57,
+          0.235
+        ],
+        "store:worker_lifecycle.instances": [
+          0.275,
+          -0.587
+        ],
+        "store:worker_lifecycle.operations": [
+          0.203,
+          0.647
+        ],
+        "store:worker_lifecycle.requests": [
+          -0.612,
+          -0.355
+        ],
+        "store:worker_lifecycle.retained": [
+          0.718,
+          -0.158
+        ],
+        "store:worker_lifecycle.swarms": [
+          -0.438,
+          0.623
+        ],
+        "tool:worker_notebook": [
+          -0.101,
+          -0.781
+        ]
+      }
+    },
+    "organ:akasha": {
+      "x": 1394,
+      "y": -392,
+      "r": 110,
+      "members": {
+        "module:crates/akasha/src/native": [
+          0.566,
+          0
+        ]
+      }
+    },
+    "organ:anamnesis": {
+      "x": 2622,
+      "y": -325,
+      "r": 124,
+      "members": {
+        "module:crates/akasha/src/anamnesis.rs": [
+          0.283,
+          0
+        ],
+        "module:crates/summoning/src/anamnesis.rs": [
+          -0.361,
+          0.331
+        ],
+        "store:anamnesis": [
+          0.055,
+          -0.63
+        ],
+        "store:anamnesis_reps": [
+          0.455,
+          0.594
+        ]
+      }
+    },
+    "organ:boats": {
+      "x": 2340,
+      "y": 2319,
+      "r": 164,
+      "members": {
+        "module:crates/origami/src/boats/sleep.rs": [
+          0.214,
+          0
+        ],
+        "module:crates/origami/src/boats/wake.rs": [
+          -0.273,
+          0.25
+        ],
+        "module:crates/origami/src/boats": [
+          0.042,
+          -0.476
+        ],
+        "module:crates/origami/src/boats/paper_boat.rs": [
+          0.344,
+          0.449
+        ],
+        "module:crates/akasha/src/paper_boat.rs": [
+          -0.632,
+          -0.112
+        ],
+        "store:crane_outbox": [
+          0.598,
+          -0.381
+        ],
+        "store:memories": [
+          -0.2,
+          0.744
+        ]
+      }
+    },
+    "organ:canon": {
+      "x": 3298,
+      "y": 1580,
+      "r": 124,
+      "members": {
+        "module:crates/akasha/src/canon.rs": [
+          0.283,
+          0
+        ],
+        "module:crates/akasha/src/entity.rs": [
+          -0.361,
+          0.331
+        ],
+        "module:crates/hearth/src/canon.rs": [
+          0.055,
+          -0.63
+        ],
+        "store:named_entities": [
+          0.455,
+          0.594
+        ]
+      }
+    },
+    "organ:docket": {
+      "x": 175,
+      "y": 1064,
+      "r": 175,
+      "members": {
+        "module:crates/akasha/src/docket": [
+          0.2,
+          0
+        ],
+        "store:docket.goals": [
+          -0.255,
+          0.234
+        ],
+        "store:docket.quest_acceptance_items": [
+          0.039,
+          -0.446
+        ],
+        "store:docket.quest_attempts": [
+          0.322,
+          0.42
+        ],
+        "store:docket.quest_events": [
+          -0.591,
+          -0.105
+        ],
+        "store:docket.quest_receipts": [
+          0.56,
+          -0.356
+        ],
+        "store:docket.quests": [
+          -0.187,
+          0.696
+        ],
+        "store:docket.room_capabilities": [
+          -0.357,
+          -0.687
+        ]
+      }
+    },
+    "organ:giga": {
+      "x": 3337,
+      "y": 2057,
+      "r": 206,
+      "members": {
+        "module:crates/akasha/src/giga": [
+          0.171,
+          0
+        ],
+        "module:crates/akasha/src/giga_worker": [
+          -0.218,
+          0.2
+        ],
+        "module:crates/hearth/src/giga": [
+          0.033,
+          -0.38
+        ],
+        "store:giga_candidate_sources": [
+          0.275,
+          0.358
+        ],
+        "store:giga_candidates": [
+          -0.504,
+          -0.089
+        ],
+        "store:giga_event_attempts": [
+          0.477,
+          -0.304
+        ],
+        "store:giga_event_replays": [
+          -0.16,
+          0.594
+        ],
+        "store:giga_event_sources": [
+          -0.304,
+          -0.586
+        ],
+        "store:giga_events": [
+          0.661,
+          0.241
+        ],
+        "store:giga_review_resonances": [
+          -0.687,
+          0.284
+        ],
+        "store:giga_reviews": [
+          0.331,
+          -0.708
+        ]
+      }
+    },
+    "organ:hallway": {
+      "x": 921,
+      "y": 1472,
+      "r": 215,
+      "members": {
+        "module:crates/akasha/src/hallway.rs": [
+          0.163,
+          0
+        ],
+        "module:crates/origami/src/hallways/messages.rs": [
+          -0.209,
+          0.191
+        ],
+        "module:crates/hearth/src/hallway.rs": [
+          0.032,
+          -0.364
+        ],
+        "module:crates/origami/src/hallways": [
+          0.263,
+          0.343
+        ],
+        "store:hallway_allowed_rooms": [
+          -0.482,
+          -0.085
+        ],
+        "store:hallway_channels": [
+          0.457,
+          -0.291
+        ],
+        "store:hallway_knocks": [
+          -0.153,
+          0.569
+        ],
+        "store:hallway_messages": [
+          -0.292,
+          -0.561
+        ],
+        "store:hallway_notifications": [
+          0.632,
+          0.231
+        ],
+        "store:hallway_presences": [
+          -0.658,
+          0.272
+        ],
+        "store:hallway_room_state": [
+          0.317,
+          -0.678
+        ],
+        "store:hallway_threads": [
+          0.234,
+          0.747
+        ]
+      }
+    },
+    "organ:hearth": {
+      "x": 1515,
+      "y": 913,
+      "r": 110,
+      "members": {}
+    },
+    "organ:insula": {
+      "x": 1427,
+      "y": 235,
+      "r": 152,
+      "members": {
+        "module:crates/akasha/src/insula_writer.rs": [
+          0.231,
+          0
+        ],
+        "module:crates/akasha/src/insula": [
+          -0.295,
+          0.27
+        ],
+        "store:insula.log": [
+          0.045,
+          -0.514
+        ],
+        "store:insula.log_tombstones": [
+          0.372,
+          0.485
+        ],
+        "store:insula.retention_receipts": [
+          -0.682,
+          -0.121
+        ],
+        "store:insula.vitals_minute": [
+          0.646,
+          -0.411
+        ]
+      }
+    },
+    "organ:lessons": {
+      "x": 2436,
+      "y": 1435,
+      "r": 175,
+      "members": {
+        "module:crates/hearth/src/lesson_triggers.rs": [
+          0.2,
+          0
+        ],
+        "module:crates/hearth/src/remember.rs": [
+          -0.255,
+          0.234
+        ],
+        "module:crates/hearth/src/triggers.rs": [
+          0.039,
+          -0.446
+        ],
+        "module:crates/akasha/src/lesson": [
+          0.322,
+          0.42
+        ],
+        "module:crates/akasha/src/remember": [
+          -0.591,
+          -0.105
+        ],
+        "store:design_documents": [
+          0.56,
+          -0.356
+        ],
+        "store:lesson_trigger_events": [
+          -0.187,
+          0.696
+        ],
+        "store:lessons": [
+          -0.357,
+          -0.687
+        ]
+      }
+    },
+    "organ:origami": {
+      "x": 1826,
+      "y": 1818,
+      "r": 196,
+      "members": {
+        "module:crates/origami/src/cranes/broker.rs": [
+          0.179,
+          0
+        ],
+        "module:crates/origami/src/cranes/delivery.rs": [
+          -0.228,
+          0.209
+        ],
+        "module:crates/origami/src/cranes/envelope.rs": [
+          0.035,
+          -0.398
+        ],
+        "module:crates/origami/src/cranes/lanes.rs": [
+          0.288,
+          0.376
+        ],
+        "module:crates/origami/src/cranes/outbox.rs": [
+          -0.528,
+          -0.093
+        ],
+        "module:crates/origami/src/cranes": [
+          0.501,
+          -0.318
+        ],
+        "module:crates/origami/src/sea.rs": [
+          -0.167,
+          0.623
+        ],
+        "store:crane_dead_letters": [
+          -0.319,
+          -0.615
+        ],
+        "store:crane_receipts": [
+          0.693,
+          0.253
+        ],
+        "store:schema_migrations": [
+          -0.721,
+          0.298
+        ]
+      }
+    },
+    "organ:presence": {
+      "x": 2334,
+      "y": 370,
+      "r": 110,
+      "members": {
+        "module:crates/akasha/src/presence.rs": [
+          0.327,
+          0
+        ],
+        "module:crates/summoning/src/presence": [
+          -0.417,
+          0.382
+        ],
+        "store:presence_sessions": [
+          0.064,
+          -0.728
+        ]
+      }
+    },
+    "organ:recall": {
+      "x": 4369,
+      "y": 1045,
+      "r": 186,
+      "members": {
+        "module:crates/hearth/src/recall.rs": [
+          0.189,
+          0
+        ],
+        "module:crates/akasha/src/recall": [
+          -0.241,
+          0.221
+        ],
+        "store:memory_chunks": [
+          0.037,
+          -0.42
+        ],
+        "store:memory_thread_refs": [
+          0.304,
+          0.396
+        ],
+        "store:operators": [
+          -0.557,
+          -0.099
+        ],
+        "store:semantic_vocabulary": [
+          0.528,
+          -0.336
+        ],
+        "store:thread_event_links": [
+          -0.176,
+          0.657
+        ],
+        "store:thread_events": [
+          -0.337,
+          -0.648
+        ],
+        "store:threads": [
+          0.73,
+          0.267
+        ]
+      }
+    },
+    "organ:routing": {
+      "x": 867,
+      "y": 2425,
+      "r": 110,
+      "members": {
+        "module:crates/host/src/routing.rs": [
+          0.566,
+          0
+        ]
+      }
+    },
+    "organ:summoning": {
+      "x": 1478,
+      "y": 2680,
+      "r": 110,
+      "members": {}
+    },
+    "organ:vault": {
+      "x": 1159,
+      "y": 2293,
+      "r": 110,
+      "members": {
+        "module:crates/vault/src/recall.rs": [
+          0.566,
+          0
+        ]
+      }
+    }
+  }
+}

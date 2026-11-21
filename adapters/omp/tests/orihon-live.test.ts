@@ -7,6 +7,7 @@ import { installOrihonTurns, ORIHON_COMPACTION_NOTE } from "../house-proof/oriho
 import { entryRecords, imageReferences, lastSourceIdBefore, replayRecords, type Entry } from "../house-proof/orihon/source.ts";
 import { readRecordedImages, readTranscriptPage } from "../house-proof/orihon/transcript.ts";
 import { markViewCache } from "../house-proof/orihon/cache.ts";
+import { registerSolarisaelTools } from "../house-proof/tools.ts";
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -172,6 +173,43 @@ async function turnFixture(fail: boolean, run: (handler: Function, ctx: any, mes
     }
   }
 }
+
+test("archive readers accept unused null selectors and refuse conflicting zoom targets", async () => {
+  const tools = new Map();
+  registerSolarisaelTools({
+    zod: z,
+    registerTool: (tool) => tools.set(tool.name, tool),
+    on() {},
+    registerCommand() {},
+  }, {});
+  const cwd = mkdtempSync(path.join(tmpdir(), "orihon-reader-"));
+  temporary.push(cwd);
+  writeFileSync(path.join(cwd, ".athanor-room.json"), JSON.stringify({ version: 1, room: "test", trueName: "Test" }));
+
+  await turnFixture(false, async (_handler, ctx, _messages, _provider, requests) => {
+    async function read(name: string, input: Record<string, unknown>) {
+      const tool = tools.get(name);
+      return tool.execute("read", tool.parameters.parse(input), undefined, undefined, { ...ctx, cwd });
+    }
+
+    const message = { id: 0, n: 1, rawOffset: null, name: null, offset: null };
+    await read("zoom", message);
+    expect(requests.at(-1).organ_request.params).toEqual({ id: 0, n: 1 });
+
+    const search = { query: "copper kestrel", afterSeq: null, untilSeq: null, turnNo: null, day: null, limit: null };
+    await read("orihon", search);
+    expect(requests.at(-1).organ_request.params).toEqual({ query: "copper kestrel" });
+
+    await read("orihon", { ...search, query: null, turnNo: 0 });
+    expect(requests.at(-1).organ_request.params).toEqual({ turnNo: 0 });
+
+    const count = requests.length;
+    const result = await read("zoom", { ...message, name: "child" });
+    expect(result.details.code).toBe("invalid_params");
+    expect(result.details.message).toContain("either id and n, or name");
+    expect(requests.length).toBe(count);
+  });
+});
 
 test("the turn prefix carries each live tool's JSON Schema object, not the omptype callable JSON.stringify drops", async () => {
   await turnFixture(false, async (handler, ctx, messages, _provider, requests) => {

@@ -7,9 +7,11 @@ export const DIAGNOSTIC_TIMEOUT_MS = 8000;
 // spends up to 3 s on an embed stall by design, then 0.8-4.1 s on the lexical
 // lane, so a 4.5 s share cut 41 of 259 recalls (16%); completed recalls ran
 // p50 1.1 s, p95 3.4 s. 8 s covered the substrate's designed ceiling on
-// Windows. Sol set 12 s for every platform on 2026-11-21. The Host uses the
-// earlier deadline, so `CONTEXT_BUDGET_MS` in
-// crates/host/src/server/context_session.rs must hold the same value.
+// Windows. Since 2026-10-08 the embed bound is 20 s (`RECALL_EMBED_TIMEOUT`,
+// crates/akasha/src/config.rs), which is longer than this budget. Sol set
+// 12 s for every platform on 2026-11-21. The Host uses the earlier deadline,
+// so `CONTEXT_BUDGET_MS` in crates/host/src/server/context_session.rs must
+// hold the same value.
 export const AUTOMATIC_CONTEXT_IO_TIMEOUT_MS = 12_000;
 export const WRITE_TIMEOUT_MS = 300_000;
 // Turn-end conversation capture. It shares PostgreSQL with every other room's

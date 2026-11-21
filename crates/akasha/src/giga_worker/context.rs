@@ -11,13 +11,8 @@ use super::failure::{WorkerFailure, WorkerFailureKind};
 use super::ledger::{ContextTurn, GIGA_MAX_CONTEXT_TURNS, ResolvedSource};
 use super::typesafe::{
     GigaClassifierConfig, JevJudgment, JudgmentPlan, judge, judgment_body, recall_grant_revision,
-    value_contains_secret,
 };
-use crate::{
-    Config, RecallResult, bm25f,
-    recall::recall,
-    typesafe::{TYPESAFE_MAX_PACKET_BYTES, is_secret},
-};
+use crate::{Config, RecallResult, bm25f, recall::recall, typesafe::TYPESAFE_MAX_PACKET_BYTES};
 use hearth::{GigaEvent, OperatorKey, RecallProjection, RecallRequest, RoomKey};
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -108,7 +103,6 @@ pub(super) struct MemoryContext {
     queries: Vec<String>,
     canon: Vec<Value>,
     memories: Vec<Value>,
-    withheld: usize,
     trimmed: usize,
     warnings: Vec<String>,
 }
@@ -134,7 +128,6 @@ impl MemoryContext {
             queries: Vec::new(),
             canon: Vec::new(),
             memories: Vec::new(),
-            withheld: 0,
             trimmed: 0,
             warnings: Vec::new(),
         }
@@ -259,10 +252,6 @@ impl MemoryContext {
             {
                 continue;
             }
-            if value_contains_secret(&entry) {
-                self.withheld += 1;
-                continue;
-            }
             self.canon.push(entry);
             added += 1;
         }
@@ -279,10 +268,6 @@ impl MemoryContext {
                 .iter()
                 .any(|known| known["memory_id"] == entry["memory_id"])
             {
-                continue;
-            }
-            if value_contains_secret(&entry) {
-                self.withheld += 1;
                 continue;
             }
             self.memories.push(entry);
@@ -333,7 +318,6 @@ impl MemoryContext {
             "queries": self.queries,
             "canon": self.canon,
             "memories": self.memories,
-            "withheld": self.withheld,
             "trimmed": self.trimmed,
             "warnings": self.warnings,
         })
@@ -603,9 +587,6 @@ pub(super) async fn judge_target(
     target: &ResolvedSource,
     classifier: &GigaClassifierConfig,
 ) -> Result<TargetJudgment, WorkerFailure> {
-    if is_secret(&target.text) || is_secret(target.source.source_id()) {
-        return Err(WorkerFailure::new(WorkerFailureKind::PrivacyRefused));
-    }
     let marker = classifier.marker().await;
     let mut memory = MemoryContext::new(
         classifier.operator().cloned(),

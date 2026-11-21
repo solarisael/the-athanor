@@ -185,7 +185,11 @@ async fn exact_ledger_repeats_collapse_but_any_conflicting_row_refuses() {
 async fn nearby_turns_are_bounded_session_context_without_source_identity() {
     let room = RoomKey::new("ledger-context").unwrap();
     let session = "context-session";
-    let text_of = |index: usize| format!("Session turn {index} discusses the lighthouse schedule.");
+    let text_of = |index: usize| match index {
+        3 => "A system notice is not a conversation turn.".to_owned(),
+        4 => "The deploy password: hunter2 stays local.".to_owned(),
+        _ => format!("Session turn {index} discusses the lighthouse schedule."),
+    };
     let role_of = |index: usize| if index % 2 == 0 { "user" } else { "assistant" };
     let target_text = text_of(6);
     let target = turn_ref(
@@ -197,11 +201,7 @@ async fn nearby_turns_are_bounded_session_context_without_source_identity() {
     let event = event_for(&room, session, vec![target.clone()]);
     let mut first_day = Vec::new();
     for index in 0..12 {
-        let text = match index {
-            3 => "A system notice is not a conversation turn.".to_owned(),
-            4 => "The deploy password: hunter2 stays local.".to_owned(),
-            _ => text_of(index),
-        };
+        let text = text_of(index);
         let role = if index == 3 { "system" } else { role_of(index) };
         first_day.push(ledger_line(session, &format!("turn-{index}"), role, &text));
         first_day.push(ledger_line(
@@ -237,15 +237,15 @@ async fn nearby_turns_are_bounded_session_context_without_source_identity() {
     assert_eq!(resolved.len(), 1);
     let source = &resolved[0];
     assert_eq!(source.text, target_text);
-    // Closest first: 5, 7 (conflict), 4 (secret), 8, 3 (system), 9, 2, 10, 1, 11.
+    // Closest first: 5, 7 (conflict), 4, 8, 3 (system), 9, 2, 10, 1.
     let offsets = source
         .context
         .iter()
         .map(|turn| turn.offset)
         .collect::<Vec<_>>();
-    assert_eq!(offsets, vec![-5, -4, -1, 2, 3, 4, 5]);
+    assert_eq!(offsets, vec![-5, -4, -2, -1, 2, 3, 4]);
     assert_eq!(source.context.len(), GIGA_MAX_CONTEXT_TURNS);
-    assert_eq!(source.withheld_context, 2);
+    assert_eq!(source.withheld_context, 1);
     for turn in &source.context {
         let index = usize::try_from(6 + turn.offset).unwrap();
         assert_eq!(turn.text, text_of(index));

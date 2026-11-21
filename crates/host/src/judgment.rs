@@ -3,7 +3,7 @@ mod recall;
 pub use orihon::{OrihonOption, choose_orihon, orihon_policy};
 
 use akasha::{
-    TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES as MAX_PACKET_BYTES, TYPESAFE_MODEL, is_secret,
+    TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES as MAX_PACKET_BYTES, TYPESAFE_MODEL,
     jev_giga_policy, request_provider,
 };
 use serde::{Deserialize, Serialize};
@@ -559,8 +559,8 @@ async fn rerank_inner(
     }
     let query = query;
     let pool = pool.as_deref().unwrap_or(&baseline);
-    if query.is_empty() || is_secret(&query) {
-        return recall_failed(&baseline, "refused", "privacy-refused", revision, started);
+    if query.is_empty() {
+        return recall_failed(&baseline, "refused", "empty-query", revision, started);
     }
     if pool.is_empty() {
         return recall_failed(&baseline, "refused", "empty-pool", revision, started);
@@ -571,11 +571,8 @@ async fn rerank_inner(
         .map(|(index, candidate)| (index, card_label(candidate), get_excerpt(candidate)))
         .collect();
 
-    if source
-        .iter()
-        .any(|(_, label, excerpt)| excerpt.is_empty() || is_secret(excerpt) || is_secret(label))
-    {
-        return recall_failed(&baseline, "refused", "privacy-refused", revision, started);
+    if source.iter().any(|(_, _, excerpt)| excerpt.is_empty()) {
+        return recall_failed(&baseline, "refused", "empty-excerpt", revision, started);
     }
     let mut cards: Vec<Card> = source
         .into_iter()
@@ -976,9 +973,6 @@ async fn score_mode(
         provider,
     );
     let body = packet.to_string();
-    if is_secret(&body) {
-        return mode_result("refused", Some(provider), "secret_like", started);
-    }
     let packet_bytes = body.len();
     if packet_bytes > MAX_PACKET_BYTES {
         return mode_result("refused", Some(provider), "oversize", started);
@@ -1074,9 +1068,6 @@ async fn score_verdict(
         provider,
     );
     let body = packet.to_string();
-    if is_secret(&body) {
-        return mode_result("refused", Some(provider), "secret_like", started);
-    }
     let packet_bytes = body.len();
     if packet_bytes > MAX_PACKET_BYTES {
         return mode_result("refused", Some(provider), "oversize", started);
@@ -1236,30 +1227,6 @@ mod tests {
             recall_policy_value(&recall_policy(&marker, "room-b", RecallGrantKind::Recall)),
             json!({ "mode": "off", "approved": false })
         );
-    }
-
-    #[tokio::test]
-    async fn privacy_refusal_precedes_credential_unavailable() {
-        let marker = recall_marker("room-a");
-        let result = rerank(
-            "room-a",
-            &marker,
-            RecallGrantKind::Recall,
-            "safe query".to_owned(),
-            Vec::new(),
-            vec![json!({
-                "source": "memory",
-                "excerpt": "Authorization: Bearer abcdefghijklmnop"
-            })],
-            None,
-            Vec::new(),
-            None,
-            None,
-        )
-        .await;
-
-        assert_eq!(result["receipt"]["status"], "refused");
-        assert_eq!(result["receipt"]["reason"], "privacy-refused");
     }
 
     #[tokio::test]

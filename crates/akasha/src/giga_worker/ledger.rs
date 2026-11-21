@@ -1,7 +1,7 @@
 use super::bounds::truncate_with_marker;
 use super::failure::{WorkerFailure, WorkerFailureKind};
 use super::identity::sha256_bytes;
-use crate::{Config, typesafe::is_secret};
+use crate::Config;
 use hearth::{
     GIGA_MAX_PROCESS_SOURCE_BYTES, GIGA_MAX_PROCESS_SOURCES, GIGA_MAX_PROCESS_WINDOW_BYTES,
     GigaEvent, GigaEventType, GigaSourceRef, GigaSourceType, GigaVisibility,
@@ -35,7 +35,7 @@ pub(super) struct ResolvedSource {
     pub(super) source: GigaSourceRef,
     pub(super) text: String,
     pub(super) context: Vec<ContextTurn>,
-    /// Nearby turns left out because their identity conflicts or their text looks secret.
+    /// Nearby turns left out because their identity conflicts.
     pub(super) withheld_context: usize,
 }
 
@@ -216,7 +216,7 @@ fn nearby_turns(turns: &[SessionTurn], target: usize, limit: usize) -> (Vec<Cont
             else {
                 continue;
             };
-            if turn.conflicted || is_secret(text) {
+            if turn.conflicted {
                 withheld += 1;
                 continue;
             }

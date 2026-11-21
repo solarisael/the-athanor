@@ -28,7 +28,7 @@ import {
   substrateHealth,
 } from "./substrate.ts";
 import { requestOrgan, organFailure, OrganError, type OrganOperation } from "./organ.ts";
-import { dispatchHouse, familiarStatus, laneStatus } from "./routing.ts";
+import { dispatchHouse, familiarStatus, laneStatus, writeSpellbook } from "./routing.ts";
 import { WRITE_TIMEOUT_MS } from "./constants.ts";
 import {
   beginHouseToolFeedback,
@@ -93,7 +93,7 @@ function hostBinding(ctx: any) {
 }
 
 function toolRefusal(message: string, tool: string) {
-  const refusal = { ok: false, error: { code: "invalid_params", message, tool } };
+  const refusal = { ok: false, code: "invalid_params", message, tool };
   return { isError: true, content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }], details: refusal };
 }
 
@@ -377,20 +377,21 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "orihon",
     label: "Athanor Orihon",
-    description: "Read exact conversation evidence by page, sequence, or day, or search user pages by query. Orihon is provenance, never memory or canon.",
+    description: "Search archived user pages by query. Read an exact page by turnNo, or read by sequence or day. Leave unused fields null or omitted. Never combine a query with read bounds. Orihon returns provenance, not memory or canon.",
     parameters: z.object({
-      query: z.string().optional().describe("Search user pages. Use without read bounds."),
-      afterSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Read after this room sequence."),
-      untilSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Stop at this room sequence, inclusive."),
-      turnNo: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Read this room page ordinal."),
-      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Read this UTC source day, YYYY-MM-DD."),
-      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum rows. Reads default to 50; searches default to 32 candidates within the provider byte budget."),
+      query: z.string().nullable().optional().describe("Search terms, or null when reading."),
+      afterSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional().describe("Read after this room sequence, or null."),
+      untilSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional().describe("Stop at this room sequence, inclusive, or null."),
+      turnNo: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional().describe("Read this room page ordinal, or null."),
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional().describe("Read this UTC source day, YYYY-MM-DD, or null."),
+      limit: z.number().int().min(1).max(4294967295).nullable().optional().describe("Maximum rows, or null for the Host default."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const binding = hostBinding(ctx).binding;
-      const request = params.query === undefined ? params : {
-        ...params,
+      const bounds = Object.fromEntries(Object.entries(params).filter(([, value]) => value != null));
+      const request = bounds.query === undefined ? bounds : {
+        ...bounds,
         credential: await resolveJudgmentCredential(ctx, binding, signal),
       };
       const result = await requestRustDomain(binding, "orihon", request, signal, false);
@@ -410,22 +411,22 @@ export function registerSolarisaelTools(pi, release) {
       "Open a line of the <chat> view. zoom(id, n) with n > 1 gives the two lines it was made from;",
       "zoom(id, 1) gives message id whole; add rawOffset to page the exact audit text behind a folded tool call.",
       "zoom(name) gives a task child's own log, the private steps behind its [name] report; offset pages it.",
-      "Every answer names its parent line, so the way back is explicit. Summaries are derived provenance.",
+      "Use one selector. Leave unused fields null or omitted. Summaries are derived provenance.",
     ].join("\n"),
     parameters: z.object({
-      id: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("First message of the line, a multiple of n."),
-      n: z.number().int().min(1).max(2 ** 40).optional().describe("Messages the line covers, a power of two; 1 opens the message whole."),
-      rawOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("With n = 1: byte offset into the raw audit text."),
-      name: z.string().min(1).max(200).optional().describe("A child's report name, as in its [name] work line."),
-      offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("With name: text-fragment offset into the child's log; continue at nextOffset. Long records remain losslessly paged."),
+      id: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional().describe("First message of the line, or null for a child log."),
+      n: z.number().int().min(1).max(2 ** 40).nullable().optional().describe("Number of messages as a power of two. Use 1 for an original, null for a child log."),
+      rawOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional().describe("Byte offset for raw audit text. Use null for the original line."),
+      name: z.string().min(1).max(200).nullable().optional().describe("Child report name, or null for a message."),
+      offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable().optional().describe("Child log offset, or null. Continue at nextOffset."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const binding = hostBinding(ctx).binding;
-      const byName = params.name !== undefined;
-      if (byName === (params.id !== undefined && params.n !== undefined)
-        || (byName && (params.id !== undefined || params.n !== undefined || params.rawOffset !== undefined))
-        || (!byName && params.offset !== undefined)) {
+      const byName = params.name != null;
+      if (byName === (params.id != null && params.n != null)
+        || (byName && (params.id != null || params.n != null || params.rawOffset != null))
+        || (!byName && params.offset != null)) {
         return toolRefusal("zoom takes either id and n, or name", "zoom");
       }
       if (byName) {
@@ -434,10 +435,10 @@ export function registerSolarisaelTools(pi, release) {
         const page = await childLogPage(ctx, result, params.offset ?? 0);
         return { isError: page.ok !== true, content: [{ type: "text", text: JSON.stringify(page, null, 2) }], details: page };
       }
-      const request = params.rawOffset === undefined ? { id: params.id, n: params.n } : { id: params.id, n: params.n, rawOffset: params.rawOffset };
+      const request = params.rawOffset == null ? { id: params.id, n: params.n } : { id: params.id, n: params.n, rawOffset: params.rawOffset };
       const result = await requestRustDomain(binding, "orihon_zoom", request, signal, false);
       const record = result.record as Record<string, unknown> | undefined;
-      if (result.ok === true && params.n === 1 && params.rawOffset === undefined
+      if (result.ok === true && params.n === 1 && params.rawOffset == null
         && record?.speaker === "OMP image attachments") {
         try {
           const manifest = JSON.parse(String(result.text));
@@ -583,12 +584,18 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "canon_read",
     label: "Athanor Canon Read",
-    description: "Read an exact PostgreSQL-authoritative canon entity by ID or active name. Set includeHistory to recover the complete retained correction/rename lineage.",
+    description: [
+      "Read an exact PostgreSQL-authoritative canon entity by ID or active name.",
+      "With subject and name, read one fact about that person; subject alone lists that person's visible facts in this room and house. An id does not combine with a subject.",
+      "Set includeHistory to recover the complete retained correction/rename lineage.",
+    ].join("\n"),
     parameters: z.object({
       id: z.string().regex(/^[1-9]\d*$/).optional()
-        .describe("Exact PostgreSQL canon entity ID. Supply either id or name, never both."),
+        .describe("Exact PostgreSQL canon entity ID. Does not combine with name or subject."),
       name: z.string().optional()
-        .describe("Exact active canon name or alias. Supply either name or id, never both."),
+        .describe("Exact active canon name or alias. Combine with subject to read one person's fact, never with id."),
+      subject: z.string().optional()
+        .describe("Registered operator key of the person the facts are about. Alone, lists visible facts in this room and house; does not combine with id."),
       includeHistory: z.boolean().optional()
         .describe("Follow supersession links in both directions and return every retained authority row."),
       room: z.enum(["house"]).optional()
@@ -602,6 +609,7 @@ export function registerSolarisaelTools(pi, release) {
         room: params.room === "house" ? "house" : room,
         id: params.id,
         name: params.name,
+        subject: params.subject,
         includeHistory: params.includeHistory,
         signal,
       });
@@ -620,11 +628,18 @@ export function registerSolarisaelTools(pi, release) {
       "Create a new PostgreSQL-authoritative active canon entity.",
       "This is a typed canon store, not a remember kind. It never overwrites by name.",
       "Corrections and renames must list every active predecessor ID in supersedes; those rows remain recoverable through canon_read history.",
+      "Set subject to the registered operator key of the person the fact is about. Scope defaults to private with a subject and company without one; only the subject can write a private fact.",
+      "Company facts are visible to everyone. The scope up and its minElevation threshold are not available for canon yet.",
     ].join("\n"),
     parameters: z.object({
       name: z.string().describe("The new active canonical name."),
       kind: z.string().describe("The entity's explicit canon type."),
       summary: z.string().describe("The complete current canonical assertion."),
+      subject: z.string().optional().describe("Registered operator key of the person this fact is about; requires a Host operator."),
+      scope: z.enum(["company", "up", "private"]).optional()
+        .describe("Who can read the fact: everyone for company, only the subject for private. Defaults to private with subject, otherwise company. Non-company scopes require subject; up is not available yet."),
+      minElevation: z.number().int().optional()
+        .describe("Minimum reader elevation for scope up. Not available yet; canon currently refuses this field."),
       aliases: z.array(z.string()).optional().describe("Exact alternate names."),
       searchBoost: z.string().optional().describe("Additional deterministic lexical retrieval terms."),
       weighty: z.boolean().optional().describe("Whether active recall should prioritize this entity."),
@@ -648,6 +663,9 @@ export function registerSolarisaelTools(pi, release) {
         name: params.name,
         kind: params.kind,
         summary: params.summary,
+        subject: params.subject,
+        scope: params.scope,
+        minElevation: params.minElevation,
         aliases: params.aliases,
         searchBoost: params.searchBoost,
         weighty: params.weighty,
@@ -1177,15 +1195,19 @@ export function registerSolarisaelTools(pi, release) {
     name: "familiar_status",
     label: "Athanor Familiar Status",
     description: [
-      "Load and validate this room's effective spellbook: the House page with this room's page laid over it.",
-      "Each page is familiars/spellbook.json (familiars/litters.json is accepted as an alias), in the House directory beside the rooms and in this room.",
-      "A room key replaces the House value whole; familiars replace by id; an explicit empty value clears.",
+      "Load and validate this room's effective spellbook from the Athanor database.",
+      "Each scope has one page: 'house' is shared, and each room has its own page.",
+      "Precedence for familiars, highest first: this room, the House, then every other room.",
+      "A room key replaces the House value whole. A familiar replaces another by id. An explicit empty value clears.",
+      "Another room's familiar joins only when this room and the House do not define its id.",
+      "Two other rooms that define one id or key make it contested. The receipt names the scopes.",
+      "The receipt shows the stored House page and this room's page in 'pages'.",
     ].join("\n"),
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const { binding, effectiveRoomDir } = hostBinding(ctx);
-      const result = await familiarStatus(binding, effectiveRoomDir);
+      const { binding } = hostBinding(ctx);
+      const result = await familiarStatus(binding);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1198,7 +1220,9 @@ export function registerSolarisaelTools(pi, release) {
     name: "familiar_dispatch",
     label: "Athanor Familiar Dispatch",
     description: [
-      "Resolve a named familiar or alias from this room's effective spellbook (House page plus room page) and build its bounded OMP task packet.",
+      "Resolve a familiar id, name, or alias from this room's effective spellbook and build its bounded OMP task packet.",
+      "Precedence, highest first: this room, the House, then every other room.",
+      "A contested id or key is refused. Define it in this room or in the House to choose.",
       "The familiar binds identity to an existing worker lane. This tool validates and packages; the main model still spawns explicitly.",
     ].join("\n"),
     parameters: z.object({
@@ -1217,8 +1241,8 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { binding, effectiveRoomDir } = hostBinding(ctx);
-      const result = await dispatchHouse(binding, effectiveRoomDir, params);
+      const { binding } = hostBinding(ctx);
+      const result = await dispatchHouse(binding, params);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1231,13 +1255,14 @@ export function registerSolarisaelTools(pi, release) {
     name: "house_dispatch",
     label: "Athanor Dispatch",
     description: [
-      "Resolve exactly one raw worker lane or room familiar and build a task-tool-ready spawn packet.",
+      "Resolve exactly one raw worker lane or familiar and build a task-tool-ready spawn packet.",
+      "A familiar comes from this room's effective spellbook in the Athanor database: this room first, then the House, then every other room.",
       "The returned spawnPacket.args can be passed directly to OMP's task tool. Spawning remains an explicit main-model action.",
       "Runtime models come from the selected agent definition; per-dispatch model overrides are not supported by current OMP.",
     ].join("\n"),
     parameters: z.object({
       lane: z.string().optional().describe("Worker lane selector. Mutually exclusive with familiar."),
-      familiar: z.string().optional().describe("Room familiar id, name, or alias. Mutually exclusive with lane."),
+      familiar: z.string().optional().describe("Familiar id, name, or alias from this room's effective spellbook. Mutually exclusive with lane."),
       task: z.string().describe("Exact work packet the worker should execute."),
       target: z.string().optional().describe("Exact target files/symbols/non-goals when known."),
       context: z.array(z.object({
@@ -1252,8 +1277,35 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { binding, effectiveRoomDir } = hostBinding(ctx);
-      const result = await dispatchHouse(binding, effectiveRoomDir, params);
+      const { binding } = hostBinding(ctx);
+      const result = await dispatchHouse(binding, params);
+      return {
+        isError: !result.ok,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "spellbook_write",
+    label: "Athanor Spellbook Write",
+    description: [
+      "Replace one spellbook page whole in the Athanor database.",
+      "Write 'house' for the shared page, or this room's key for this room's page. Other scopes are refused.",
+      "Read familiar_status first. Its 'pages' field holds the stored pages to edit.",
+      "The Host validates before it writes. A room page must validate over the House page.",
+      "A House page must validate alone, and it must not break a room page that validates now.",
+      "The receipt has ok, scope, errors, and this room's familiar status after the write.",
+    ].join("\n"),
+    parameters: z.object({
+      scope: z.string().describe("'house' or this room's key."),
+      page: z.record(z.string(), z.unknown()).describe("The complete page: version, collective, collectiveAliases, spellbookAliases, guide, familiars. Omitted keys inherit from the House."),
+    }),
+    approval: "write",
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await writeSpellbook(binding, params.scope, params.page);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

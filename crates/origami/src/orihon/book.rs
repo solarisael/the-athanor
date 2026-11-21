@@ -24,6 +24,11 @@ pub(super) fn advance(value: i64) -> Result<i64, Error> {
 }
 
 impl Book {
+    pub(super) fn next_seq(&self) -> Result<i64, Error> {
+        self.complete()?;
+        Ok(self.next_seq)
+    }
+
     pub fn source(&self, harness: &str, session: &str, id: &str) -> Option<&Record> {
         let seq = self.sources.get(harness)?.get(session)?.get(id)?;
         self.records.get(seq)

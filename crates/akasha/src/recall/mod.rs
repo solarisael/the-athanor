@@ -725,55 +725,69 @@ pub async fn recall(
     // leftover LIMIT slots. An exact row is authority the caller named, so it
     // carries its complete active assertion; only the similarity tier is
     // excerpted, and that excerpt says so.
+    // Person facts enter the mention tier only when the query names their subject.
     let phase = Phase::start(span, "recall.canon");
     let query_phrase = query.trim().to_lowercase();
-    let canon_rows = sqlx::query(
+    let canon_sql = format!(
         r#"WITH tiered AS (
              SELECT id,name,kind,summary,aliases,weighty,pointer_files,
                     (CASE
                        WHEN lower(name) = $5
                          OR EXISTS (SELECT 1 FROM unnest(aliases) a1 WHERE lower(a1) = $5)
                        THEN 0
-                       WHEN lower(name) = ANY($2::text[])
-                         OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[]))
-                         OR (length(name) >= 3 AND strpos($5, lower(name)) > 0)
-                         OR EXISTS (SELECT 1 FROM unnest(aliases) a3
-                                    WHERE length(a3) >= 3 AND strpos($5, lower(a3)) > 0)
+                       WHEN mentioned_subject.key IS NOT NULL
+                         OR (subject IS NULL AND (
+                             lower(name) = ANY($2::text[])
+                             OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[]))
+                             OR (length(name) >= 3 AND strpos($5, lower(name)) > 0)
+                             OR EXISTS (SELECT 1 FROM unnest(aliases) a3
+                                        WHERE length(a3) >= 3 AND strpos($5, lower(a3)) > 0)))
                        THEN 1
                        ELSE 2
                      END) AS exactness
-             FROM named_entities, websearch_to_tsquery($6::regconfig, $3) AS tsq
+             FROM named_entities
+             LEFT JOIN operators AS mentioned_subject
+               ON mentioned_subject.key = named_entities.subject
+              AND ($5 ~ ('\m' || mentioned_subject.key || '\M')
+                   OR $5 ~ ('\m' || regexp_replace(lower(mentioned_subject.display_name),
+                                                  '([\[\]\\.^$|?*+(){{}}])', '\\\1', 'g') || '\M'))
+             CROSS JOIN websearch_to_tsquery($6::regconfig, $3) AS tsq
              WHERE room = ANY($1::text[])
-               AND authority = 'active'
+               AND authority = 'active'{}
                AND (lower(name) = $5
                     OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = $5)
-                    OR lower(name) = ANY($2::text[])
-                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[]))
-                    OR (length(name) >= 3 AND strpos($5, lower(name)) > 0)
-                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias
-                               WHERE length(alias) >= 3 AND strpos($5, lower(alias)) > 0)
-                    OR name ILIKE ANY($4::text[])
-                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[]))
+                    OR mentioned_subject.key IS NOT NULL
+                    OR (subject IS NULL AND (
+                        lower(name) = ANY($2::text[])
+                        OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[]))
+                        OR (length(name) >= 3 AND strpos($5, lower(name)) > 0)
+                        OR EXISTS (SELECT 1 FROM unnest(aliases) alias
+                                   WHERE length(alias) >= 3 AND strpos($5, lower(alias)) > 0)
+                        OR name ILIKE ANY($4::text[])
+                        OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[]))))
                     OR summary_tsv @@ tsq)
            )
            SELECT id,name,kind,summary,aliases,weighty,pointer_files,exactness
            FROM tiered
            ORDER BY exactness, weighty DESC, name
            LIMIT $7"#,
-    )
-    .bind(&rooms)
-    .bind(&canon_terms)
-    .bind(query)
-    .bind(&canon_patterns)
-    .bind(&query_phrase)
-    .bind(&settings.house_language)
-    .bind(if projection.is_manual() {
-        i64::from(semantic_top_k.max(content_top_k))
-    } else {
-        12
-    })
-    .fetch_all(pool)
-    .await?;
+        crate::canon_scope::visible("named_entities", 8)
+    );
+    let canon_rows = sqlx::query(&canon_sql)
+        .bind(&rooms)
+        .bind(&canon_terms)
+        .bind(query)
+        .bind(&canon_patterns)
+        .bind(&query_phrase)
+        .bind(&settings.house_language)
+        .bind(if projection.is_manual() {
+            i64::from(semantic_top_k.max(content_top_k))
+        } else {
+            12
+        })
+        .bind(request.operator().map(|operator| operator.as_str()))
+        .fetch_all(pool)
+        .await?;
     // The SQL tiers bound the rows; the profile reorders inside one tier, so a
     // mode lifts its own kinds without ever passing an exact row the caller
     // named.

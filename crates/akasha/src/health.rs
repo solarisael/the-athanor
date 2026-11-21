@@ -28,6 +28,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "crane_receipts",
     "crane_dead_letters",
     "room_settings",
+    "spellbook_pages",
     "insula.log",
     "insula.vitals_minute",
     "insula.retention_receipts",

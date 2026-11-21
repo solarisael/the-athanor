@@ -9,7 +9,7 @@
 //! Anthropic provider that shape carries four cache marks: the last tool, the stable system head,
 //! the last whole block, and the request end.
 //!
-//! A line over 512 bytes gets the same-conversation "Too long" correction. After five replies the
+//! A line over 512 bytes gets a "Too long" correction on the original request. After five replies the
 //! shortest complete one stands: "a few bytes over is fine, because the view measures real
 //! sizes". A reply cut by the output budget is never kept. A failed call ends its job.
 //! The Host retries failed work after 60 seconds while a registered fold session participates.
@@ -284,6 +284,7 @@ impl Inner {
         cancellation: &CancellationToken,
     ) -> Result<String, Stop> {
         // Complete replies over the limit, as (attempt index, line), for the shortest rule.
+        let opening_messages = conversation.len();
         let mut over = Vec::new();
         for number in 1..=MAX_ATTEMPTS {
             if cancellation.is_cancelled() {
@@ -392,7 +393,8 @@ impl Inner {
             }
             if number < MAX_ATTEMPTS {
                 let correction = too_long(bytes, cut(line, LINE_BYTES));
-                self.backend.correct(conversation, reply, correction);
+                conversation.truncate(opening_messages);
+                conversation.push(self.backend.correction(correction));
             }
         }
         // The first of equally short lines stands.
@@ -552,18 +554,11 @@ impl Backend {
         conversation
     }
 
-    /// The same-conversation correction: the reply as the model gave it, then "Too long".
-    fn correct(&self, conversation: &mut Vec<Value>, reply: Reply, correction: String) {
-        conversation.push(match reply.replay {
-            Some(message) => message,
-            None => local_message("assistant", reply.text),
-        });
-        conversation.push(match self {
-            Self::Local { .. } => local_message("user", correction),
-            Self::Hosted { .. } => {
-                pi_user(vec![text_part(correction)], Utc::now().timestamp_millis())
-            }
-        });
+    fn correction(&self, text: String) -> Value {
+        match self {
+            Self::Local { .. } => local_message("user", text),
+            Self::Hosted { .. } => pi_user(vec![text_part(text)], Utc::now().timestamp_millis()),
+        }
     }
 }
 
@@ -589,8 +584,6 @@ struct Reply {
     text: String,
     /// False when the reply stopped at the output budget: a cut line is never kept.
     complete: bool,
-    /// OMP's own message, replayed verbatim by a hosted correction.
-    replay: Option<Value>,
 }
 
 enum Stop {
@@ -694,7 +687,6 @@ fn local_call(reply: Result<LocalReply, LocalFailure>) -> Call {
             result: Ok(Reply {
                 complete: reply.done_reason == "stop",
                 text: reply.text,
-                replay: None,
             }),
         },
         Err(failure) => {
@@ -775,11 +767,7 @@ fn hosted_reply(mut line: Value, provider: &str, id: &str) -> Call {
     Call {
         receipt,
         served: true,
-        result: Ok(Reply {
-            text,
-            complete,
-            replay: Some(message),
-        }),
+        result: Ok(Reply { text, complete }),
     }
 }
 

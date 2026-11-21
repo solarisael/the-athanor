@@ -345,8 +345,8 @@ The status also shows the model and the current session's latest folder outcome.
 Use `/orihon off` to stop this session's new records and cancel its folder job.
 Use `/orihon log` to record in this session without automatic folding.
 Use `/orihon fold MODEL:TAG` to enable recording and local folding.
-Use `/orihon fold hosted` to select hosted folding with Sonnet 5.5.
-Use `/orihon fold hosted PROVIDER/MODEL` to select another supported OMP model.
+Use `/orihon fold hosted` to select the OMP role `@orihon_fold`.
+Use `/orihon fold hosted @ROLE` or `/orihon fold hosted PROVIDER/MODEL` to select a different model.
 Each new session receives its own recording generation.
 An off-to-log or off-to-fold transition starts a new generation for the current session.
 
@@ -429,7 +429,9 @@ Cancellation does not attest that an upstream provider stops its internal comput
 Warning: hosted folding sends conversation text through the selected OMP model route.
 Changing this session's setting does not stop hosted folding in another active session.
 
-Run `/orihon fold hosted` to select `anthropic/claude-sonnet-5-5`.
+Set `modelRoles.orihon_fold` in the active OMP profile's `config.yml`.
+Run `/orihon fold hosted` to resolve that role and save the model.
+Run the command again after you change the role.
 Keep the current session open. The Host summarizes this room's live records in the background.
 Run `/orihon status` to inspect the provider, model, and outcome.
 Run `/orihon log` to stop this session's folding while its recording continues.

@@ -24,7 +24,12 @@ pub(crate) struct RankingProfile {
 /// said lately.
 const CONVERSATION: RankingProfile = RankingProfile {
     mode: RecallMode::Conversation,
-    canon_kinds: &[("person", 2.0), ("ritual", 2.0), ("mythology", 2.0)],
+    canon_kinds: &[
+        ("person", 2.0),
+        ("ritual", 2.0),
+        ("mythology", 2.0),
+        ("alter", 2.0),
+    ],
     memory_types: &[("narrative", 1.5), ("relationship", 1.5)],
     recency: 1.1,
 };
@@ -33,7 +38,7 @@ const CONVERSATION: RankingProfile = RankingProfile {
 /// because it is old, so work carries no recency bias.
 const WORK: RankingProfile = RankingProfile {
     mode: RecallMode::Work,
-    canon_kinds: &[("project", 2.0)],
+    canon_kinds: &[("project", 2.0), ("role", 2.0), ("preference", 2.0)],
     memory_types: &[("decision", 1.5), ("technical", 1.5)],
     recency: 1.0,
 };

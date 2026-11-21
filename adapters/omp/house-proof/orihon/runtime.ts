@@ -122,14 +122,29 @@ export async function hostedRuntime(cwd: string, pi: any) {
   return { executable, ...(entrypoint ? { entrypoint } : {}), home: realpathSync(homedir()), agentDir, cwd, configFiles: overlays, environment };
 }
 
-export async function foldOptions(words: string[], cwd: string, pi: any): Promise<Record<string, unknown>> {
+export async function foldOptions(
+  words: string[],
+  cwd: string,
+  pi: any,
+  resolveModel: (selector: string) => { provider: string; id: string } | undefined,
+): Promise<Record<string, unknown>> {
   if (!words.length) return {};
   if (words[0] === "hosted") {
-    const model = words[1];
-    if (words.length > 2 || (model !== undefined && !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+$/.test(model))) {
-      throw new Error("Hosted folding requires an exact provider/model selector");
+    const selector = words[1] ?? "@orihon_fold";
+    if (words.length > 2 || !/^(?:@[a-zA-Z0-9_-]+|[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_./-]+)$/.test(selector)) {
+      throw new Error("Hosted folding requires an OMP role or exact provider/model selector");
     }
-    return { backend: "hosted", ...(model === undefined ? {} : { model }), runtime: await hostedRuntime(cwd, pi) };
+
+    let model = selector;
+    if (selector.startsWith("@")) {
+      const resolved = resolveModel(selector);
+      if (!resolved) {
+        throw new Error(`OMP cannot resolve ${selector}. Set modelRoles.${selector.slice(1)} or pass an exact provider/model`);
+      }
+      model = `${resolved.provider}/${resolved.id}`;
+    }
+
+    return { backend: "hosted", model, runtime: await hostedRuntime(cwd, pi) };
   }
   const model = words[0] === "local" ? words[1] : words[0];
   if (!model || words.length !== (words[0] === "local" ? 2 : 1)) {

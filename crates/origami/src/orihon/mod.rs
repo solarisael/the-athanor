@@ -9,5 +9,5 @@ mod read;
 mod redaction;
 
 pub use error::Error;
-pub use file::{append_file, export_file, read_file};
+pub use file::{append_file, export_file, next_seq_file, read_file};
 pub use pg::{append_pg, append_pg_in_transaction, read_pg};

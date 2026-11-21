@@ -395,7 +395,9 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     migration!("0010_semantic_vocabulary.sql"),
                     migration!("0015_canon_authority.sql"),
                     migration!("0028_room_settings.sql"),
+                    migration!("0035_operator_axis.sql"),
                     migration!("0047_memory_amendments.sql"),
+                    migration!("0048_operator_canon.sql"),
                 ] {
                     sqlx::raw_sql(sql).execute(&pool).await?;
                 }

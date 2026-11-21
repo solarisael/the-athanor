@@ -1,8 +1,8 @@
-use crate::config::AppError;
+use crate::{canon_scope, config::AppError};
 use chrono::{DateTime, NaiveDate, Utc};
 use hearth::{
-    CanonAttribution, CanonAuthority, CanonReadRequest, CanonSelector, CanonWriteReceipt,
-    CanonWriteRequest,
+    CanonAttribution, CanonAuthority, CanonReadRequest, CanonScope, CanonSelector,
+    CanonWriteReceipt, CanonWriteRequest,
 };
 use protocol::{CanonEntityResult, CanonReadResult, CanonWriteResult};
 use serde_json::{Value, json};
@@ -17,13 +17,17 @@ fn canon_database_error(error: sqlx::Error) -> AppError {
     let Some(database) = error.as_database_error() else {
         return AppError::Database(error);
     };
+
     match database.constraint() {
-        Some("named_entities_active_room_name_key") => AppError::Invalid(
+        Some("named_entities_active_room_subject_name_key") => AppError::Invalid(
             "an active canon entity with this room/name already exists; explicitly supersede its ID"
                 .into(),
         ),
-        Some("named_entities_superseded_by_fkey") => {
-            AppError::Invalid("canon predecessor does not exist".into())
+        Some("named_entities_superseded_by_fkey") => AppError::Invalid(
+            "every superseded canon entity must exist in the destination room".into(),
+        ),
+        Some("named_entities_subject_fkey") => {
+            AppError::Invalid("the subject is not a registered operator".into())
         }
         _ => AppError::Database(error),
     }
@@ -37,32 +41,55 @@ async fn lock_predecessors(
     if predecessor_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let rows = sqlx::query(
-        "SELECT id,name,aliases,authority FROM named_entities WHERE id=ANY($1::bigint[]) AND room=$2 ORDER BY id FOR UPDATE",
-    )
-    .bind(predecessor_ids)
-    .bind(request.room().as_str())
-    .fetch_all(&mut **tx)
-    .await?;
+
+    let sql = format!(
+        "SELECT entity.id,entity.name,entity.aliases,entity.authority,entity.subject,entity.scope FROM named_entities entity WHERE entity.id=ANY($1::bigint[]) AND entity.room=$2{} ORDER BY entity.id FOR UPDATE",
+        canon_scope::visible("entity", 3)
+    );
+    let rows = sqlx::query(&sql)
+        .bind(predecessor_ids)
+        .bind(request.room().as_str())
+        .bind(request.writer().map(|writer| writer.as_str()))
+        .fetch_all(&mut **tx)
+        .await?;
+
     if rows.len() != predecessor_ids.len() {
         return Err(AppError::Invalid(
             "every superseded canon entity must exist in the destination room".into(),
         ));
     }
+
+    let successor_is_public = request.subject().is_none() || request.scope() == CanonScope::Company;
+
     let mut prior_names = Vec::new();
+
     for row in rows {
         let id: i64 = row.try_get("id")?;
         let authority: String = row.try_get("authority")?;
-        let name: String = row.try_get("name")?;
-        let aliases: Vec<String> = row.try_get("aliases")?;
+
         if authority != "active" {
             return Err(AppError::Invalid(format!(
                 "canon entity {id} is {authority}; only active authority may be superseded"
             )));
         }
+
+        if successor_is_public {
+            let subject: Option<&str> = row.try_get("subject")?;
+            let scope: &str = row.try_get("scope")?;
+
+            if subject.is_some() && scope != "company" {
+                // Inherited labels must be visible to every reader of the successor.
+                continue;
+            }
+        }
+
+        let name: String = row.try_get("name")?;
+        let aliases: Vec<String> = row.try_get("aliases")?;
+
         prior_names.push(name);
         prior_names.extend(aliases);
     }
+
     Ok(prior_names)
 }
 
@@ -70,7 +97,7 @@ async fn lock_predecessors(
 // deliberately not ENTITY_COLUMNS: summary_tsv is GENERATED ALWAYS
 // (0001_initial.sql:73) and created_at/updated_at keep their DDL DEFAULT NOW()
 // (0001_initial.sql:78-79), so none of the three may travel in the record.
-const ENTITY_INSERT_COLUMNS: &str = "id,room,name,kind,summary,aliases,search_boost,weighty,pointer_files,summary_as_of,meta,authority,supersedes,attributed_by,attribution_origin";
+const ENTITY_INSERT_COLUMNS: &str = "id,room,subject,scope,min_elevation,name,kind,summary,aliases,search_boost,weighty,pointer_files,summary_as_of,meta,authority,supersedes,attributed_by,attribution_origin";
 
 // Keys are named_entities column names; the table is the only schema
 // (0001_initial.sql:63-81, 0015_canon_authority.sql:3-8). jsonb_populate_record
@@ -88,6 +115,9 @@ fn entity_row(
     json!({
         "id": entity_id,
         "room": request.room().as_str(),
+        "subject": request.subject().map(|subject| subject.as_str()),
+        "scope": request.scope().as_str(),
+        "min_elevation": request.min_elevation(),
         "name": request.name(),
         "kind": request.kind(),
         "summary": request.summary(),
@@ -136,22 +166,30 @@ pub async fn canon_write(
             .collect(),
     );
 
+    let subject = request.subject().map(|subject| subject.as_str());
+    let writer = request.writer().map(|writer| writer.as_str());
+
     let mut tx = pool.begin().await?;
     sqlx::query(
-        "SELECT pg_advisory_xact_lock(hashtextextended(jsonb_build_array($1::text,lower($2::text))::text,0))",
+        "SELECT pg_advisory_xact_lock(hashtextextended(jsonb_build_array($1::text,COALESCE($2::text,''),lower($3::text))::text,0))",
     )
     .bind(request.room().as_str())
+    .bind(subject)
     .bind(request.name())
     .execute(&mut *tx)
     .await?;
     let prior_names = lock_predecessors(&mut tx, &request, &predecessor_ids).await?;
-    let conflicting_ids = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM named_entities WHERE room=$1 AND authority='active' AND lower(name)=lower($2) ORDER BY id FOR UPDATE",
-    )
-    .bind(request.room().as_str())
-    .bind(request.name())
-    .fetch_all(&mut *tx)
-    .await?;
+    let sql = format!(
+        "SELECT entity.id FROM named_entities entity WHERE entity.room=$1 AND COALESCE(entity.subject,'')=COALESCE($2::text,'') AND entity.authority='active' AND lower(entity.name)=lower($3){} ORDER BY entity.id FOR UPDATE",
+        canon_scope::visible("entity", 4)
+    );
+    let conflicting_ids = sqlx::query_scalar::<_, i64>(&sql)
+        .bind(request.room().as_str())
+        .bind(subject)
+        .bind(request.name())
+        .bind(writer)
+        .fetch_all(&mut *tx)
+        .await?;
     if conflicting_ids
         .iter()
         .any(|id| !predecessor_ids.contains(id))
@@ -230,8 +268,15 @@ pub async fn canon_write(
     Ok(receipt.into())
 }
 
-const ENTITY_COLUMNS: &str = "id,room,name,kind,summary,aliases,search_boost,weighty,pointer_files,summary_as_of,meta,authority,superseded_by,supersedes,attributed_by,attribution_origin,created_at,updated_at";
-const ENTITY_COLUMNS_QUALIFIED: &str = "entity.id,entity.room,entity.name,entity.kind,entity.summary,entity.aliases,entity.search_boost,entity.weighty,entity.pointer_files,entity.summary_as_of,entity.meta,entity.authority,entity.superseded_by,entity.supersedes,entity.attributed_by,entity.attribution_origin,entity.created_at,entity.updated_at";
+const ENTITY_COLUMNS: &str = "entity.id,entity.room,entity.subject,entity.scope,entity.name,entity.kind,entity.summary,entity.aliases,entity.search_boost,entity.weighty,entity.pointer_files,entity.summary_as_of,entity.meta,entity.authority,entity.attributed_by,entity.attribution_origin,entity.created_at,entity.updated_at";
+
+fn visible_entity_columns(param: usize) -> String {
+    format!(
+        "{ENTITY_COLUMNS},{} AS superseded_by,{} AS supersedes",
+        canon_scope::visible_successor("entity", param),
+        canon_scope::visible_predecessors("entity", param)
+    )
+}
 
 fn entity_result(row: sqlx::postgres::PgRow) -> Result<CanonEntityResult, AppError> {
     let id: i64 = row.try_get("id")?;
@@ -245,6 +290,8 @@ fn entity_result(row: sqlx::postgres::PgRow) -> Result<CanonEntityResult, AppErr
     Ok(CanonEntityResult {
         entity_id: id.to_string(),
         room: row.try_get("room")?,
+        subject: row.try_get("subject")?,
+        scope: row.try_get("scope")?,
         name: row.try_get("name")?,
         kind: row.try_get("kind")?,
         summary: row.try_get("summary")?,
@@ -272,24 +319,36 @@ async fn read_by_id(
     room: &str,
     id: i64,
     include_history: bool,
+    reader: Option<&str>,
 ) -> Result<Vec<sqlx::postgres::PgRow>, AppError> {
-    if include_history {
-        let sql = format!(
-            "WITH RECURSIVE lineage AS (SELECT {ENTITY_COLUMNS} FROM named_entities WHERE room=$1 AND id=$2 UNION SELECT {ENTITY_COLUMNS_QUALIFIED} FROM named_entities entity JOIN lineage current ON entity.room=current.room AND (entity.id=current.superseded_by OR entity.superseded_by=current.id)) SELECT {ENTITY_COLUMNS} FROM lineage ORDER BY created_at,id"
-        );
-        Ok(sqlx::query(&sql)
-            .bind(room)
-            .bind(id)
-            .fetch_all(pool)
-            .await?)
+    let visibility = canon_scope::visible("entity", 3);
+    let columns = visible_entity_columns(3);
+    let sql = if include_history {
+        format!(
+            "WITH RECURSIVE lineage AS (
+                SELECT {ENTITY_COLUMNS},entity.superseded_by,entity.supersedes
+                FROM named_entities entity
+                WHERE entity.room=$1 AND entity.id=$2{visibility}
+                UNION
+                SELECT {ENTITY_COLUMNS},entity.superseded_by,entity.supersedes
+                FROM named_entities entity
+                JOIN lineage current ON (entity.id=current.superseded_by OR entity.superseded_by=current.id)
+                WHERE entity.room=current.room{visibility}
+             )
+             SELECT {columns} FROM lineage entity ORDER BY entity.created_at,entity.id"
+        )
     } else {
-        let sql = format!("SELECT {ENTITY_COLUMNS} FROM named_entities WHERE room=$1 AND id=$2");
-        Ok(sqlx::query(&sql)
-            .bind(room)
-            .bind(id)
-            .fetch_all(pool)
-            .await?)
-    }
+        format!(
+            "SELECT {columns} FROM named_entities entity WHERE entity.room=$1 AND entity.id=$2{visibility}"
+        )
+    };
+
+    Ok(sqlx::query(&sql)
+        .bind(room)
+        .bind(id)
+        .bind(reader)
+        .fetch_all(pool)
+        .await?)
 }
 
 async fn read_by_name(
@@ -297,32 +356,83 @@ async fn read_by_name(
     room: &str,
     name: &str,
     include_history: bool,
+    reader: Option<&str>,
 ) -> Result<Vec<sqlx::postgres::PgRow>, AppError> {
-    if include_history {
-        let sql = format!(
-            "WITH RECURSIVE lineage AS (SELECT {ENTITY_COLUMNS} FROM named_entities WHERE room=$1 AND (lower(name)=lower($2) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias)=lower($2))) UNION SELECT {ENTITY_COLUMNS_QUALIFIED} FROM named_entities entity JOIN lineage current ON entity.room=current.room AND (entity.id=current.superseded_by OR entity.superseded_by=current.id)) SELECT {ENTITY_COLUMNS} FROM lineage ORDER BY created_at,id"
-        );
-        Ok(sqlx::query(&sql)
-            .bind(room)
-            .bind(name)
-            .fetch_all(pool)
-            .await?)
+    let visibility = canon_scope::visible("entity", 3);
+    let columns = visible_entity_columns(3);
+    let sql = if include_history {
+        format!(
+            "WITH RECURSIVE lineage AS (
+                SELECT {ENTITY_COLUMNS},entity.superseded_by,entity.supersedes
+                FROM named_entities entity
+                WHERE entity.room=$1 AND (lower(entity.name)=lower($2) OR EXISTS (SELECT 1 FROM unnest(entity.aliases) alias WHERE lower(alias)=lower($2))){visibility}
+                UNION
+                SELECT {ENTITY_COLUMNS},entity.superseded_by,entity.supersedes
+                FROM named_entities entity
+                JOIN lineage current ON (entity.id=current.superseded_by OR entity.superseded_by=current.id)
+                WHERE entity.room=current.room{visibility}
+             )
+             SELECT {columns} FROM lineage entity ORDER BY entity.created_at,entity.id"
+        )
     } else {
-        let sql = format!(
-            "SELECT {ENTITY_COLUMNS} FROM named_entities WHERE room=$1 AND authority='active' AND (lower(name)=lower($2) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias)=lower($2))) ORDER BY id"
-        );
-        Ok(sqlx::query(&sql)
-            .bind(room)
-            .bind(name)
-            .fetch_all(pool)
-            .await?)
-    }
+        format!(
+            "SELECT {columns} FROM named_entities entity WHERE entity.room=$1 AND entity.authority='active' AND (lower(entity.name)=lower($2) OR EXISTS (SELECT 1 FROM unnest(entity.aliases) alias WHERE lower(alias)=lower($2))){visibility} ORDER BY entity.id"
+        )
+    };
+
+    Ok(sqlx::query(&sql)
+        .bind(room)
+        .bind(name)
+        .bind(reader)
+        .fetch_all(pool)
+        .await?)
+}
+
+async fn read_by_subject(
+    pool: &PgPool,
+    room: &str,
+    subject: &str,
+    name: Option<&str>,
+    include_history: bool,
+    reader: Option<&str>,
+) -> Result<Vec<sqlx::postgres::PgRow>, AppError> {
+    let visibility = canon_scope::visible("entity", 4);
+    let columns = visible_entity_columns(4);
+    let sql = if include_history {
+        format!(
+            "WITH RECURSIVE lineage AS (
+                SELECT {ENTITY_COLUMNS},entity.superseded_by,entity.supersedes
+                FROM named_entities entity
+                WHERE entity.room IN ($1,'house') AND entity.subject=$2 AND ($3::text IS NULL OR lower(entity.name)=lower($3) OR EXISTS (SELECT 1 FROM unnest(entity.aliases) alias WHERE lower(alias)=lower($3))){visibility}
+                UNION
+                SELECT {ENTITY_COLUMNS},entity.superseded_by,entity.supersedes
+                FROM named_entities entity
+                JOIN lineage current ON (entity.id=current.superseded_by OR entity.superseded_by=current.id)
+                WHERE entity.room=current.room{visibility}
+             )
+             SELECT {columns} FROM lineage entity ORDER BY entity.created_at,entity.id"
+        )
+    } else {
+        format!(
+            "SELECT {columns} FROM named_entities entity WHERE entity.room IN ($1,'house') AND entity.subject=$2 AND entity.authority='active' AND ($3::text IS NULL OR lower(entity.name)=lower($3) OR EXISTS (SELECT 1 FROM unnest(entity.aliases) alias WHERE lower(alias)=lower($3))){visibility} ORDER BY entity.id"
+        )
+    };
+
+    Ok(sqlx::query(&sql)
+        .bind(room)
+        .bind(subject)
+        .bind(name)
+        .bind(reader)
+        .fetch_all(pool)
+        .await?)
 }
 
 pub async fn canon_read(
     pool: &PgPool,
     request: CanonReadRequest,
 ) -> Result<CanonReadResult, AppError> {
+    let reader = request.reader().map(|reader| reader.as_str());
+
     let rows = match request.selector() {
         CanonSelector::Id(id) => {
             read_by_id(
@@ -330,6 +440,7 @@ pub async fn canon_read(
                 request.room().as_str(),
                 postgres_id(*id, "id")?,
                 request.include_history(),
+                reader,
             )
             .await?
         }
@@ -339,6 +450,18 @@ pub async fn canon_read(
                 request.room().as_str(),
                 name,
                 request.include_history(),
+                reader,
+            )
+            .await?
+        }
+        CanonSelector::Subject { subject, name } => {
+            read_by_subject(
+                pool,
+                request.room().as_str(),
+                subject.as_str(),
+                name.as_deref(),
+                request.include_history(),
+                reader,
             )
             .await?
         }

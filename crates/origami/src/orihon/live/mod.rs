@@ -364,9 +364,9 @@ impl View {
             .sum()
     }
 
-    /// Lines tile `0..units` with aligned tree nodes, oldest first.
+    /// Lines tile a contiguous suffix ending at `units`, oldest first.
     pub fn validate(&self) -> Result<(), String> {
-        let mut next = 0;
+        let mut next = self.lines.first().map_or(0, |key| key.first());
         for key in &self.lines {
             if key.level > MAX_LEVEL || key.first() != next {
                 return Err(format!(
@@ -391,6 +391,30 @@ impl View {
         self.lines.extend((self.units..units).map(NodeKey::leaf));
         self.units = units;
         true
+    }
+
+    /// Append individual lines. When the budget is exceeded, drop older lines in one batch.
+    pub fn roll(&mut self, units: u64, high: usize, low: usize, sizes: &impl Sizes) -> bool {
+        let appended = self.append(units);
+        let mut bytes = self.bytes(sizes);
+        let mut removed = 0;
+
+        if bytes > high {
+            for key in self.lines.iter().take(self.lines.len().saturating_sub(1)) {
+                if bytes <= low {
+                    break;
+                }
+                bytes -= line_bytes(*key, sizes.bytes(*key));
+                removed += 1;
+            }
+            self.lines.drain(..removed);
+        }
+
+        if appended || removed != 0 {
+            self.revision += 1;
+            return true;
+        }
+        false
     }
 
     /// Merge the most due sibling pair whose parent is built, oldest first on ties, until the
@@ -476,17 +500,48 @@ pub struct Maintenance {
     pub appended: bool,
     pub chat_merges: usize,
     pub compactor_merges: usize,
+    batch_state_changed: bool,
 }
 
 impl Maintenance {
     pub fn changed(&self) -> bool {
-        self.appended || self.chat_merges > 0 || self.compactor_merges > 0
+        self.appended
+            || self.chat_merges > 0
+            || self.compactor_merges > 0
+            || self.batch_state_changed
     }
 }
 
-/// The message-boundary step for both persisted views. New units append their lines. Past 128 KB
-/// the chat view merges down to 64 KB, continuing at later boundaries while parents are unbuilt.
-/// The compactor view independently merges from 32 KB down to 16 KB.
+// At a message boundary a partial batch is useful. Between boundaries publish
+// only a substantial reduction, so individual node completions do not churn the prefix.
+fn fit(view: &mut View, high: usize, low: usize, appended: bool, sizes: &impl Sizes) -> usize {
+    let bytes = view.bytes(sizes);
+
+    if bytes <= high && !(appended && view.merging) {
+        return 0;
+    }
+
+    if appended {
+        let merges = view.merge_down(view.units, low, sizes);
+        view.merging = view.bytes(sizes) > low;
+        return merges;
+    }
+
+    let mut candidate = view.clone();
+    let merges = candidate.merge_down(view.units, low, sizes);
+    let remaining = candidate.bytes(sizes);
+
+    if remaining <= low.max(bytes - high) {
+        view.lines = candidate.lines;
+        view.merging = remaining > low;
+        return merges;
+    }
+
+    view.merging = true;
+    0
+}
+
+/// Update the two views independently. A new unit marks a message boundary.
 pub fn maintain(
     chat: &mut View,
     compactor: &mut View,
@@ -497,21 +552,18 @@ pub fn maintain(
         appended: chat.append(units),
         ..Maintenance::default()
     };
-    compactor.append(units);
-    if !chat.merging && chat.bytes(sizes) > CHAT_HIGH {
-        chat.merging = true;
-    }
-    if chat.merging {
-        change.chat_merges = chat.merge_down(units, CHAT_LOW, sizes);
-        chat.merging = chat.bytes(sizes) > CHAT_LOW;
-    }
-    if !compactor.merging && compactor.bytes(sizes) > COMPACTOR_HIGH {
-        compactor.merging = true;
-    }
-    if compactor.merging {
-        change.compactor_merges = compactor.merge_down(units, COMPACTOR_LOW, sizes);
-        compactor.merging = compactor.bytes(sizes) > COMPACTOR_LOW;
-    }
+    let compactor_appended = compactor.append(units);
+    let batch_state = (chat.merging, compactor.merging);
+
+    change.chat_merges = fit(chat, CHAT_HIGH, CHAT_LOW, change.appended, sizes);
+    change.compactor_merges = fit(
+        compactor,
+        COMPACTOR_HIGH,
+        COMPACTOR_LOW,
+        compactor_appended,
+        sizes,
+    );
+    change.batch_state_changed = batch_state != (chat.merging, compactor.merging);
     if change.changed() {
         chat.revision += 1;
         compactor.revision += 1;
@@ -710,6 +762,41 @@ mod tests {
             previous_text = text;
         }
         assert!(batches >= 2);
+    }
+
+    #[test]
+    fn background_merges_keep_the_prefix_until_a_full_batch_or_a_new_message() {
+        let mut sizes: HashMap<_, _> = (0..256).map(|i| (NodeKey::leaf(i), 510)).collect();
+        let mut chat = View::default();
+        let mut compactor = View::default();
+        maintain(&mut chat, &mut compactor, 256, &sizes);
+        let original = chat.lines.clone();
+        let original_compactor = compactor.lines.clone();
+
+        sizes.insert(key(1, 0), 500);
+        let partial = maintain(&mut chat, &mut compactor, 256, &sizes);
+
+        assert!(!partial.changed());
+        assert_eq!(chat.lines, original);
+        assert_eq!(compactor.lines, original_compactor);
+
+        sizes.insert(NodeKey::leaf(256), 510);
+        let next = maintain(&mut chat, &mut compactor, 257, &sizes);
+
+        assert_eq!(next.chat_merges, 1);
+        assert_eq!(next.compactor_merges, 1);
+        assert_eq!(chat.lines[0], key(1, 0));
+        assert_eq!(chat.lines.last(), Some(&NodeKey::leaf(256)));
+        assert!(chat.merging);
+        chat.validate().unwrap();
+
+        sizes.extend((1..128).map(|i| (key(1, i), 480)));
+        let full = maintain(&mut chat, &mut compactor, 257, &sizes);
+
+        assert!(full.chat_merges > 0);
+        assert!(chat.bytes(&sizes) <= CHAT_LOW);
+        assert!(!chat.merging);
+        chat.validate().unwrap();
     }
 
     #[test]

@@ -9,6 +9,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_substrate(None, None)
+    }
+
+    fn with_substrate(pool: Option<sqlx::PgPool>, operator: Option<String>) -> Self {
         let root = std::env::temp_dir().join(format!("athanor-context-{}", new_id()));
         let config = HostConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
@@ -23,14 +27,14 @@ impl Fixture {
             nats_url: None,
             nats_auth: None,
             knock_autonomy: KnockAutonomy::Off,
-            operator: None,
+            operator,
         };
         crate::store::atomic_json_write(&config.room_state_path(), &json!({
             "room":"test-room","operator":"Operator","agentName":"Test","embodiedSpirit":"Test",
             "recallPolicy":{"requestedMode":"auto","resolvedMode":"conversation","activeProject":null,"resolutionReason":"default",
                 "lastRefreshReason":null,"lastRefreshAt":null,"workingSetEntries":0,"recoveryPending":false,"recoveryTerms":[],"degraded":null,"updatedAt":null}
         })).unwrap();
-        let state = Host::new(config, None, CancellationToken::new(), TaskTracker::new())
+        let state = Host::new(config, pool, CancellationToken::new(), TaskTracker::new())
             .unwrap()
             .state;
         let meta = CommandMeta {
@@ -58,6 +62,10 @@ impl Fixture {
     }
 
     async fn prove_frame(&self) {
+        self.prove_frame_with_continuity(Vec::new()).await;
+    }
+
+    async fn prove_frame_with_continuity(&self, continuity: Vec<Value>) {
         let authentication = authenticate_presence(&self.state, &self.meta).unwrap();
         let body = "Current authenticated identity";
         let material = materials::material(
@@ -68,7 +76,7 @@ impl Fixture {
             1000,
         );
         let request = serde_json::from_value(
-            json!({"binding":authentication.binding,"identity":[material],"previousBoat":null}),
+            json!({"binding":authentication.binding,"identity":[material],"continuity":continuity,"previousBoat":null}),
         )
         .unwrap();
         let ledger = PresenceLedger {
@@ -761,12 +769,193 @@ async fn lesson_plan_requests_no_typesafe_credential_for_disabled_or_laya_only_g
     );
 }
 
-#[test]
-fn canon_presence_material_keeps_the_native_numeric_identity() {
-    let materials =
-        materials::recalled(&json!({"canonMatches":[{"id":42,"summary":"Authoritative fact"}]}));
-    assert_eq!(materials[0]["id"], "canon:42");
-    assert_eq!(materials[0]["authority"]["entity_id"], "42");
+#[tokio::test]
+async fn canon_recall_and_operator_card_share_an_entity_without_a_presence_conflict() {
+    let fixture = Fixture::new();
+    let card = materials::operator_card(
+        (3..=42)
+            .map(|entity_id| akasha::operator_card::OperatorCardRow {
+                entity_id,
+                name: format!("fact-{entity_id}"),
+                kind: "preference".into(),
+                summary: format!("Standing fact {entity_id}."),
+            })
+            .collect(),
+    );
+    fixture.prove_frame_with_continuity(card).await;
+    let recalled =
+        materials::recalled(&json!({"canonMatches":[{"id":42,"summary":"Standing fact 42."}]}));
+
+    assert_eq!(recalled.len(), 1);
+    assert_eq!(recalled[0]["id"], "canon:42");
+    assert_eq!(recalled[0]["authority"]["entity_id"], "42");
+
+    let mut runtime = fixture.state.runtime.lock().await;
+    let (frame, _) = runtime
+        .presence
+        .session_state(&fixture.meta.sender_session)
+        .unwrap();
+    let frame_id = frame.frame_id.clone();
+
+    assert_eq!(frame.continuity.len(), 40);
+    assert!(frame.rendered.contains("Standing fact 42."));
+    assert!(frame.continuity.iter().any(|material| {
+        material.id == "operator-card:42"
+            && material.authority
+                == summoning::presence::PresenceAuthority::Canon {
+                    entity_id: "42".into(),
+                }
+    }));
+
+    let request = serde_json::from_value(json!({
+        "frameId":frame_id,"frameVersion":frame.version,"turnId":"same-row",
+        "userText":"What is fact 42?","recalled":recalled,"lessons":[],"directives":[]
+    }))
+    .unwrap();
+    let contract = runtime
+        .presence
+        .compile(&fixture.meta.sender_session, "same-row-compile", request)
+        .expect("P19: a card row and recall of the same entity must compile together");
+
+    assert_eq!(contract.frame_id, frame_id);
+    assert_eq!(contract.turn_id, "same-row");
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; creates and drops one isolated schema"]
+async fn operator_card_is_reselected_when_embodiment_rotates_the_frame() {
+    use futures_util::FutureExt;
+
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
+        .expect("the operator card rotation proof requires a dedicated PostgreSQL URL");
+    let lower = url.to_ascii_lowercase();
+
+    assert!(
+        !lower.contains("solarisael_memory") && !lower.contains("solarisael-house"),
+        "refusing a live or production-looking database"
+    );
+
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("isolated card database must be reachable");
+    let schema = format!("athanor_context_card_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&pool)
+        .await
+        .expect("isolated card schema must create");
+    let observation = std::panic::AssertUnwindSafe(async {
+        sqlx::query(&format!("SET search_path TO {schema}, public"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        akasha::migrations::run_migrations(&pool)
+            .await
+            .expect("canonical migrations must apply to the card schema");
+        akasha::operator_registry::register_operator(
+            &pool,
+            &akasha::operator_registry::OperatorRegistration {
+                unit: "card_test".into(),
+                unit_name: "Card test unit".into(),
+                key: "reader".into(),
+                display_name: "Database Reader".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let params: protocol::CanonWriteParams = serde_json::from_value(json!({
+            "room":"test-room","name":"working-preference","kind":"preference",
+            "summary":"Standing fact selected from PostgreSQL.","weighty":true,
+            "operator":"reader","subject":"reader","scope":"private",
+            "attribution":{"actor":"Card regression","origin":"test:context-session"}
+        }))
+        .unwrap();
+        let row = akasha::canon_write(&pool, params.try_into().unwrap())
+            .await
+            .unwrap();
+        let card_id = format!("operator-card:{}", row.entity_id);
+        let mut fixture = Fixture::with_substrate(Some(pool.clone()), Some("reader".into()));
+        let request = fixture.request("before-rotation").await;
+        let first = prepare_inner(&fixture.state, &fixture.meta, request)
+            .await
+            .unwrap();
+
+        assert!(
+            first["turns"]
+                .to_string()
+                .contains("Standing fact selected from PostgreSQL.")
+        );
+
+        let (old_frame_id, old_card) = {
+            let runtime = fixture.state.runtime.lock().await;
+            let (frame, _) = runtime
+                .presence
+                .session_state(&fixture.meta.sender_session)
+                .expect("P18: assembly must open a frame containing the database card");
+            let card = frame
+                .continuity
+                .iter()
+                .find(|material| material.id == card_id)
+                .expect("P18: the initial frame must contain the reader's card row");
+
+            (frame.frame_id.clone(), card.clone())
+        };
+        let patch =
+            serde_json::from_value(json!({"action":"patch","embodiedSpirit":"Other"})).unwrap();
+        crate::room_state::execute(
+            &fixture.state.room_store,
+            &fixture.state.config.room_dir,
+            &fixture.state.config.spirit,
+            patch,
+        )
+        .unwrap();
+        fixture.meta.sender_spirit = "Other".into();
+        let request = fixture.request("after-rotation").await;
+        let changed = prepare_inner(&fixture.state, &fixture.meta, request)
+            .await
+            .unwrap();
+
+        assert_eq!(changed["invalidationReason"], "identity-epoch-changed");
+
+        let runtime = fixture.state.runtime.lock().await;
+        let (frame, _) = runtime
+            .presence
+            .session_state(&fixture.meta.sender_session)
+            .unwrap();
+        let cards = frame
+            .continuity
+            .iter()
+            .filter(|material| material.id.starts_with("operator-card:"))
+            .collect::<Vec<_>>();
+
+        assert_ne!(
+            frame.frame_id, old_frame_id,
+            "P18 must exercise a real frame rotation"
+        );
+        assert_eq!(frame.binding.spirit, "Other");
+        assert_eq!(
+            cards,
+            vec![&old_card],
+            "P18: rotation must reselect the card exactly once"
+        );
+        assert!(
+            frame
+                .rendered
+                .contains("Standing fact selected from PostgreSQL.")
+        );
+    })
+    .catch_unwind()
+    .await;
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&pool)
+        .await
+        .expect("only the card test's schema must drop");
+    pool.close().await;
+
+    if let Err(panic) = observation {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 #[tokio::test]

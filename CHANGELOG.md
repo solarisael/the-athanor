@@ -21,6 +21,27 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
+- Orihon Fold keeps the current prefix when one background merge makes a small change.
+- A new message can publish a partial merge batch. Background jobs publish only a substantial reduction.
+- Orihon Fold sends only the latest size correction when it retries a compactor request.
+- Orihon resolves the hosted folder through the OMP role `@orihon_fold` when no model is specified.
+- Orihon refuses an unresolved role. It no longer selects Sonnet by default.
+- Schema 48 puts canon on the operator axis with a subject, scope, and minimum elevation.
+- Spellbooks moved from room files into PostgreSQL. Schema 49 adds table
+  `spellbook_pages`: one page for `house` and one for each room. The Host no
+  longer reads `familiars/spellbook.json` or `familiars/litters.json`. Run
+  `substrate/import-spellbook-files.sh <vault> <database-url>` once to copy the
+  old files into the table.
+- Every room now resolves every familiar. Precedence, highest first: the
+  requester's room, the House, then every other room. An id or key that two
+  other rooms claim is contested, and dispatch by it is refused with the scopes
+  named. A foreign familiar never refuses the room's book.
+- Familiars in receipts carry `origin`. The dispatch receipt's spellbook
+  identity comes from the familiar's own page over the House page.
+  `familiar_status` reports `sources` as scopes (`room`, `house`, `other`) and
+  adds `warnings`, `contested`, and `pages`.
+- `RoutingDispatch` and `FamiliarStatus` lost their `room_dir` field. The Host
+  uses its configured room.
 - `substrate/deploy-local.ps1` with no arguments now installs the newest
   unconsumed preparation of `HEAD`. It prepares a new release only when no
   preparation matches. A preparation from a dirty tree matches only while no
@@ -35,6 +56,11 @@ the exact implementation record.
 - Migration 0022 applies again in a second schema on PostgreSQL 18. Its Insula guard now ignores the NOT NULL constraints that PostgreSQL 18 catalogues.
 
 ### Added
+- `spellbook_write` (Host command `athanor.spellbook.write`) replaces this
+  room's page or the House page whole after validation. A House page that
+  would break a room page is refused, and the refusal names the room.
+- `substrate/deploy-local.sh` updates a provisioned Linux House.
+  It keeps a database backup and the previous release. It checks health after the update.
 - `thread_memories` adds existing readable memories to one thread without changing their text.
 - A thread member with no named predecessor now continues the latest earlier member by memory date. This applies to `remember` and `thread_memories`.
 - A memory that supersedes other memories now joins every thread of those memories.

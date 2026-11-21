@@ -69,6 +69,7 @@ const WRITE_OPERATIONS = new Set([
   "recall_policy",
   "house_model_default",
   "anamnesis_write",
+  "spellbook_write",
 ]);
 const VALID_WRITE_OUTCOMES = new Set(["not_started", "rolled_back", "committed", "unknown"]);
 const VALID_RETRIES = new Set(["safe_now", "after_change", "reconcile_first", "never"]);

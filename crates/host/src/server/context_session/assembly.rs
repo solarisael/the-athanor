@@ -429,7 +429,8 @@ async fn presence(
     } else {
         let identity_materials = vec![material];
         let relationship = materials::pulse(state)?.into_iter().collect::<Vec<_>>();
-        let input = json!({"binding":{"room":identity.room,"spirit":identity.spirit,"operator":identity.operator,"session":meta.sender_session},"identity":identity_materials,"relationship":relationship,"continuity":[],"anamnesis":output.counsel,"previousBoat":output.boat,"uncertainties":[]});
+        let continuity = materials::fetch_operator_card(state, &identity.room).await;
+        let input = json!({"binding":{"room":identity.room,"spirit":identity.spirit,"operator":identity.operator,"session":meta.sender_session},"identity":identity_materials,"relationship":relationship,"continuity":continuity,"anamnesis":output.counsel,"previousBoat":output.boat,"uncertainties":[]});
         let typed = serde_json::from_value(input.clone())
             .map_err(|error| format!("invalid Presence material: {error}"))?;
         let answer = command(
@@ -606,7 +607,7 @@ async fn prepare_static_blocks(
             .existing_block_kinds
             .contains(&BlockKind::RoomContext)
         {
-            let guide = house_guide(state, output);
+            let guide = house_guide(state, output).await;
             output.block(
                 BlockKind::RoomContext,
                 format!("{}{guide}", analysis.room_reminder),
@@ -652,11 +653,13 @@ async fn prepare_static_blocks(
 }
 
 /// The effective spellbook's guide teaches the House organs at startup. An
-/// absent book teaches nothing; a refused one says why instead of going quiet.
-fn house_guide(state: &AppState, output: &mut Assembly) -> String {
-    let loaded = read_room_spellbook(&state.config.room_dir.to_string_lossy());
+/// absent book teaches nothing; a refused or unreadable one says why instead
+/// of going quiet.
+async fn house_guide(state: &AppState, output: &mut Assembly) -> String {
+    let pages = read_spellbook_pages(state).await;
+    let loaded = crate::routing::load_spellbook(&state.config.room, &pages);
     let Some(spellbook) = loaded.status.spellbook else {
-        if !loaded.sources.is_empty() {
+        if pages.is_err() || !loaded.sources.is_empty() {
             output.warnings.push(format!(
                 "House spellbook refused: {}",
                 loaded.status.errors.join(" ")

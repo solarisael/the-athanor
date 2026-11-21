@@ -1,4 +1,7 @@
-use crate::config::{AppError, ROOM_KEY_RE};
+use crate::{
+    canon_scope,
+    config::{AppError, ROOM_KEY_RE},
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
@@ -14,6 +17,8 @@ pub struct EntityResolveParams {
     pub query: String,
     #[serde(default = "default_limit")]
     pub limit: u32,
+    #[serde(default)]
+    pub operator: Option<String>,
 }
 fn default_limit() -> u32 {
     8
@@ -125,7 +130,15 @@ pub async fn entity_resolve(
     } else {
         vec![params.room, "house".to_string()]
     };
-    let rows = sqlx::query("SELECT name,kind,aliases FROM named_entities WHERE room=ANY($1) AND authority='active' ORDER BY name,id").bind(rooms).fetch_all(pool).await?;
+    let sql = format!(
+        "SELECT entity.name,entity.kind,entity.aliases FROM named_entities entity WHERE entity.room=ANY($1) AND entity.authority='active'{} ORDER BY entity.name,entity.id",
+        canon_scope::visible("entity", 2)
+    );
+    let rows = sqlx::query(&sql)
+        .bind(rooms)
+        .bind(params.operator.as_deref())
+        .fetch_all(pool)
+        .await?;
     let entities = rows
         .iter()
         .map(|row| {

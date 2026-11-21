@@ -18,7 +18,8 @@ struct CliConfig {
     room_dir: PathBuf,
     state_dir: PathBuf,
     bearer_token_file: PathBuf,
-    /// OMEGA: the one operator this Host process serves. Absent on a local House.
+    /// The operator this Host process serves. Without one, private person facts
+    /// cannot be read and no person fact can be written.
     #[serde(default)]
     operator: Option<String>,
 }

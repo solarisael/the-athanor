@@ -17,7 +17,7 @@ The Host command socket. One file holds the projection constants, the recall pol
 | `hallway` | ProjectHallwayInbox, ClaimHallwayKnock, SettleHallwayKnock | HallwayInboxProjectionEvent, HallwayKnockClaimedEvent, HallwayKnockSettledEvent | 23-31, 385-390, 1666-1685 |
 | `akasha` | AkashaRecallQuery, AkashaLessonQuery | AkashaRecallResultEvent, AkashaLessonResultEvent | 32-37, 392-398, 1690-1702 |
 | `presence` | PresenceOpen, PresenceCompile, PresenceSettle, PresenceClose | PresenceResultEvent | 38-47, 979-994, 1705 |
-| `routing` | RoutingStatus, RoutingDispatch, FamiliarStatus | RoutingResultEvent | 48-52, 995-1008, 1712-1716 |
+| `routing` | RoutingStatus, RoutingDispatch, FamiliarStatus, SpellbookWrite | RoutingResultEvent | 48-53 |
 | `lineage` | NormalizeLineage, SettleLineage | LineageResultEvent | 53-56, 1009-1016, 1719-1727 |
 | `shell` | LogConversation, PlanTriggerLessons, BraidTriggerLessons | ShellResultEvent | 57-61, 607-633, 1732-1736 |
 | `chat` | ChatSubscribe, ChatSay, ChatTurn, ChatDraft | ChatEvent (snapshot or delta), command accepted or refused | 80-88, 1034-1048, 1742 |
@@ -25,7 +25,8 @@ The Host command socket. One file holds the projection constants, the recall pol
 
 - `AkashaLessonQuery` takes the room from the binding, not from the payload (`host.rs:392-398`).
 - `SettleHallwayKnock` carries the knock identifier, the outcome, and an optional reason (`host.rs:385-390`).
-- `RoutingDispatch` and `FamiliarStatus` carry an optional room directory (`host.rs:995-1008`).
+- `RoutingDispatch` and `FamiliarStatus` carry no room directory. The Host uses its own configured room.
+- `SpellbookWrite` (`athanor.spellbook.write`) carries `{scope, page}` in `routing_request`.
 
 **Metadata.**
 

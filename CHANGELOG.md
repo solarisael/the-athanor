@@ -21,6 +21,7 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
+- The Recall plan receipt in `recall-turns.jsonl` now records how sure Jev was. It shows the index and the action of the selected plan, the confidence of Jev, and the probability of each candidate plan. It contains no query text. Each record also has the action of the plan that the Host used, with or without a judgment from Jev.
 - Each Recall card that Jev scores now has a label: the title of the memory and the heading of the section. Before this change, Jev got the excerpt only.
 - Jev now scores each of the 64 candidates of the Recall pool. The Recall packet has its own limit of 65,536 bytes. Before this change, a limit of 32,768 bytes removed 16 to 18 candidates from each packet.
 - In conversation mode, a message that names a canon entity now gets a Recall search when the plan judge selects Skip. Other Skip plans stay a skip.

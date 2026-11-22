@@ -454,6 +454,30 @@ fn active_empty_rerank_removes_raw_lanes_but_failure_preserves_them() {
 }
 
 #[test]
+fn plan_receipt_keeps_choice_numbers_and_drops_text() {
+    let source = json!({
+        "schemaVersion":"jev-recall-receipt.v1","status":"shadow","reason":"selected-supplied-plan",
+        "selectedIndex":1,"selectedAction":"skip","confidence":0.71,
+        "choices":[
+            {"index":0,"action":"search","query":"harbor query"},
+            {"index":1,"action":"skip","probability":0.8},
+            {"index":2,"action":"invented","probability":0.1}
+        ],
+        "query":"harbor query","subjectTerms":["harbor"]
+    });
+    let receipt = observations::receipt(&source);
+
+    assert_eq!(receipt["selectedIndex"], 1);
+    assert_eq!(receipt["selectedAction"], "skip");
+    assert_eq!(receipt["confidence"], 0.71);
+    assert_eq!(
+        receipt["choices"],
+        json!([{"index":0,"action":"search"},{"index":1,"action":"skip","probability":0.8}])
+    );
+    assert!(!receipt.to_string().contains("harbor"));
+}
+
+#[test]
 fn baseline_lessons_keep_order_and_share_one_presence_directive() {
     let baseline: Vec<lessons::Lesson> = (1..=10)
         .map(|id| lessons::Lesson {

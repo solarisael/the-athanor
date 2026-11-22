@@ -125,6 +125,7 @@ pub(super) fn receipt(source: &Value) -> Value {
         "cropped",
         "packetBytes",
         "responseBytes",
+        "selectedIndex",
     ] {
         if let Some(value) = source[key].as_u64() {
             receipt[key] = json!(value);
@@ -133,5 +134,28 @@ pub(super) fn receipt(source: &Value) -> Value {
     if let Some(value) = source["fallbackUsed"].as_bool() {
         receipt["fallbackUsed"] = json!(value);
     }
+    if let Ok(action) = protocol::RecallPlanAction::deserialize(&source["selectedAction"]) {
+        receipt["selectedAction"] = json!(action);
+    }
+    if let Some(value) = source["confidence"].as_f64() {
+        receipt["confidence"] = json!(value);
+    }
+    let choices: Vec<Value> = array(&source["choices"])
+        .iter()
+        .filter_map(|choice| {
+            let index = choice["index"].as_u64()?;
+            let action = protocol::RecallPlanAction::deserialize(&choice["action"]).ok()?;
+            let mut entry = json!({ "index": index, "action": action });
+            if let Some(probability) = choice["probability"].as_f64() {
+                entry["probability"] = json!(probability);
+            }
+            Some(entry)
+        })
+        .collect();
+
+    if !choices.is_empty() {
+        receipt["choices"] = json!(choices);
+    }
+
     receipt
 }

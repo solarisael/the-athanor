@@ -172,6 +172,11 @@ pub(super) async fn evaluate(
             planning = json!({"status":"refused","reason":"deadline","fallbackUsed":true});
         }
     }
+
+    if let Some(plan) = &query_plan {
+        planning["action"] = json!(plan.action);
+    }
+
     let next_subject = query_plan
         .as_ref()
         .filter(|plan| {

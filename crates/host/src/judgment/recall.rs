@@ -72,7 +72,16 @@ fn plan_packet(
     })
 }
 
-fn parse_plan_response(raw: &str, tokens: &[String]) -> Result<(String, usize), &'static str> {
+#[derive(Debug, PartialEq)]
+struct PlanSelection {
+    model: String,
+    index: usize,
+    confidence: Option<f64>,
+    /// One entry per candidate, by candidate index.
+    probabilities: Vec<Option<f64>>,
+}
+
+fn parse_plan_response(raw: &str, tokens: &[String]) -> Result<PlanSelection, &'static str> {
     let parsed = parse_json(raw).ok_or("malformed")?;
     let model = parsed
         .get("model")
@@ -113,16 +122,20 @@ fn parse_plan_response(raw: &str, tokens: &[String]) -> Result<(String, usize), 
     }) {
         return Err("invalid-response");
     }
-    if let Some(probabilities) = answer.get("probabilities") {
-        let probabilities = probabilities.as_object().ok_or("invalid-response")?;
-        if probabilities.iter().any(|(token, value)| {
+    let probabilities = answer
+        .get("probabilities")
+        .map(|value| value.as_object().ok_or("invalid-response"))
+        .transpose()?;
+
+    if probabilities.is_some_and(|probabilities| {
+        probabilities.iter().any(|(token, value)| {
             !tokens.contains(token)
                 || value
                     .as_f64()
                     .is_none_or(|score| !score.is_finite() || !(0.0..=1.0).contains(&score))
-        }) {
-            return Err("invalid-response");
-        }
+        })
+    }) {
+        return Err("invalid-response");
     }
     let selected = answer
         .get("choice")
@@ -133,7 +146,53 @@ fn parse_plan_response(raw: &str, tokens: &[String]) -> Result<(String, usize), 
         .position(|token| token == selected)
         .ok_or("unknown-plan")?;
 
-    Ok((model.to_owned(), index))
+    let probabilities = tokens
+        .iter()
+        .map(|token| {
+            probabilities
+                .and_then(|probabilities| probabilities.get(token))
+                .and_then(Value::as_f64)
+        })
+        .collect();
+
+    Ok(PlanSelection {
+        model: model.to_owned(),
+        index,
+        confidence: answer.get("confidence").and_then(Value::as_f64),
+        probabilities,
+    })
+}
+
+/// Builds the success receipt from indexes, action names, and numbers only; candidate text never enters it.
+fn selection_receipt(
+    mode: &str,
+    revision: &str,
+    candidates: &[RecallQueryPlan],
+    selection: &PlanSelection,
+    mut measures: Value,
+) -> Value {
+    measures["model"] = json!(selection.model);
+    measures["selectedIndex"] = json!(selection.index);
+    measures["selectedAction"] = json!(candidates[selection.index].action);
+    if let Some(confidence) = selection.confidence {
+        measures["confidence"] = json!(confidence);
+    }
+    if selection.probabilities.iter().any(Option::is_some) {
+        measures["choices"] = candidates
+            .iter()
+            .zip(&selection.probabilities)
+            .enumerate()
+            .map(|(index, (plan, probability))| {
+                let mut choice = json!({ "index": index, "action": plan.action });
+                if let Some(probability) = probability {
+                    choice["probability"] = json!(probability);
+                }
+                choice
+            })
+            .collect();
+    }
+
+    recall_receipt(mode, Some("selected-supplied-plan"), revision, measures)
 }
 
 fn validate_plans(
@@ -226,17 +285,24 @@ pub(super) async fn plan(
         Err("deadline") => return refused("refused", "deadline"),
         Err(reason) => return refused("failed", reason),
     };
-    let (model, index) = match parse_plan_response(&raw, &tokens) {
+    let selection = match parse_plan_response(&raw, &tokens) {
         Ok(selection) => selection,
         Err(reason) => return refused("failed", reason),
     };
     let selected = if policy.mode == "active" {
-        Some(&candidates[index])
+        Some(&candidates[selection.index])
     } else {
         None
     };
+    let receipt = selection_receipt(
+        &policy.mode,
+        revision,
+        &candidates,
+        &selection,
+        json!({ "latencyMs": elapsed_ms(started), "packetBytes": packet_bytes, "responseBytes": raw.len() }),
+    );
 
-    json!({ "plan": selected, "receipt": recall_receipt(&policy.mode, Some("selected-supplied-plan"), revision, json!({ "model": model, "latencyMs": elapsed_ms(started), "packetBytes": packet_bytes, "responseBytes": raw.len() })) })
+    json!({ "plan": selected, "receipt": receipt })
 }
 
 #[cfg(test)]
@@ -271,7 +337,12 @@ mod tests {
         });
         assert_eq!(
             parse_plan_response(&raw.to_string(), &tokens),
-            Ok(("jev-1.14.0".into(), 0))
+            Ok(PlanSelection {
+                model: "jev-1.14.0".into(),
+                index: 0,
+                confidence: Some(0.96),
+                probabilities: vec![Some(0.98), Some(0.02)],
+            })
         );
         raw["answers"]["plan"]["probabilities"]["invented"] = json!(0.5);
         assert_eq!(
@@ -287,6 +358,81 @@ mod tests {
             parse_plan_response(&raw.to_string(), &tokens),
             Err("invalid-response")
         );
+    }
+
+    #[test]
+    fn choice_without_confidence_or_probabilities_selects_without_metadata() {
+        let tokens = vec!["search-plan".into(), "skip-plan".into()];
+        let raw = json!({"model":"jev-1.14.0", "answers":{"plan":{"type":"choice","choice":"skip-plan"}}});
+
+        assert_eq!(
+            parse_plan_response(&raw.to_string(), &tokens),
+            Ok(PlanSelection {
+                model: "jev-1.14.0".into(),
+                index: 1,
+                confidence: None,
+                probabilities: vec![None, None],
+            })
+        );
+    }
+
+    #[test]
+    fn selection_receipt_carries_choice_numbers_without_candidate_text() {
+        let candidate = |action, text: &str| RecallQueryPlan {
+            action,
+            query: format!("{text} query"),
+            intent: format!("{text} intent"),
+            subject_terms: vec![format!("{text} term")],
+            source_turn_ids: vec![format!("{text} turn")],
+            reason: format!("{text} reason"),
+        };
+        let candidates = vec![
+            candidate(protocol::RecallPlanAction::Search, "harbor"),
+            candidate(protocol::RecallPlanAction::Skip, "lantern"),
+        ];
+        let tokens = vec!["opaque-search".to_owned(), "opaque-skip".to_owned()];
+        let raw = json!({"model":"jev-1.14.0", "answers":{"plan":{
+            "type":"choice","choice":"opaque-skip","confidence":0.71,
+            "probabilities":{"opaque-skip":0.8}
+        }}});
+        let selection = parse_plan_response(&raw.to_string(), &tokens).unwrap();
+        let receipt = selection_receipt(
+            "shadow",
+            "test",
+            &candidates,
+            &selection,
+            json!({"latencyMs": 3}),
+        );
+
+        assert_eq!(receipt["status"], "shadow");
+        assert_eq!(receipt["reason"], "selected-supplied-plan");
+        assert_eq!(receipt["model"], "jev-1.14.0");
+        assert_eq!(receipt["latencyMs"], 3);
+        assert_eq!(receipt["selectedIndex"], 1);
+        assert_eq!(receipt["selectedAction"], "skip");
+        assert_eq!(receipt["confidence"], 0.71);
+        assert_eq!(
+            receipt["choices"],
+            json!([
+                {"index": 0, "action": "search"},
+                {"index": 1, "action": "skip", "probability": 0.8}
+            ])
+        );
+        let serialized = receipt.to_string();
+        for text in ["harbor", "lantern", "opaque"] {
+            assert!(!serialized.contains(text), "receipt leaked {text}");
+        }
+
+        let bare = PlanSelection {
+            confidence: None,
+            probabilities: vec![None, None],
+            ..selection
+        };
+        let receipt = selection_receipt("active", "test", &candidates, &bare, json!({}));
+
+        assert!(receipt.get("confidence").is_none());
+        assert!(receipt.get("choices").is_none());
+        assert_eq!(receipt["selectedAction"], "skip");
     }
 
     #[test]

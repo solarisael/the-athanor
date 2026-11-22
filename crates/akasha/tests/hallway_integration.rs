@@ -454,10 +454,16 @@ async fn hallway_supports_multiple_spirit_instances_and_ordered_messages() -> Te
         sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(KNOCK_EXPIRED_MIGRATION)
+            .execute(&pool)
+            .await?;
         sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(KNOCK_EXPIRED_MIGRATION)
+            .execute(&pool)
+            .await?;
         run_contract(&pool).await?;
         run_knock_contract(&pool).await?;
         pool.close().await;

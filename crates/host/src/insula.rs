@@ -718,6 +718,7 @@ mod tests {
             bearer_token: BEARER.to_owned(),
             room_dir: PathBuf::from("."),
             state_dir: PathBuf::from("."),
+            house_dir: None,
             house_id: "solarisael".to_owned(),
             room: "kodo".to_owned(),
             spirit: "Kodo".to_owned(),

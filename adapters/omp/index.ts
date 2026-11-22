@@ -433,8 +433,8 @@ export default function solarisaelHouseProof(pi, release) {
       });
     },
     room: (ctx) => {
-      const { spirit, effectiveRoomDir } = requireRoomContext(ctx);
-      return { dir: effectiveRoomDir, spirit };
+      const { spirit, effectiveRoomDir, houseDir } = requireRoomContext(ctx);
+      return { dir: effectiveRoomDir, houseDir, spirit };
     },
   });
   // The binding this session runtime currently holds the room with. A switch

@@ -20,8 +20,8 @@ fn policy(marker: &Value, room: &str) -> GrantPolicy {
     )
 }
 
-pub async fn orihon_policy(room_dir: &Path, room: &str) -> Value {
-    let marker = read_marker(room_dir).await;
+pub async fn orihon_policy(room_dir: &Path, house_dir: Option<&Path>, room: &str) -> Value {
+    let marker = read_marker(room_dir, house_dir).await;
     let policy = policy(&marker, room);
 
     json!({"approved":policy.approved,"provider":policy.provider,"revision":policy.revision})
@@ -30,13 +30,14 @@ pub async fn orihon_policy(room_dir: &Path, room: &str) -> Value {
 /// Sends exact, bounded Orihon text only under the room's separate navigation grant.
 pub async fn choose_orihon(
     room_dir: &Path,
+    house_dir: Option<&Path>,
     room: &str,
     query: &str,
     options: &[OrihonOption],
     credential: Option<&str>,
     deadline: Option<u64>,
 ) -> Value {
-    let marker = read_marker(room_dir).await;
+    let marker = read_marker(room_dir, house_dir).await;
     let policy = policy(&marker, room);
 
     if !policy.approved {

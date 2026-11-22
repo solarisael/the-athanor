@@ -51,6 +51,8 @@ export type Attachment = {
   spirit: string;
   operator: string;
   homeDir: string;
+  // The House folder that the Host names; empty when the Host names none.
+  houseDir: string;
   context: { revision: string; text: string } | null;
   controls: string[];
   chatDelivery: boolean;
@@ -295,6 +297,7 @@ async function attachConversation(
     spirit: text(result.spirit),
     operator: text(result.operator) || "Operator",
     homeDir: text(result.homeDir),
+    houseDir: text(result.houseDir),
     context: result.context && typeof result.context.text === "string"
       ? { revision: text(result.context.revision), text: result.context.text }
       : null,
@@ -345,7 +348,7 @@ function failedAttachment(ctx: any, room: string, source: Attachment["source"], 
   const attachment: Attachment = {
     key, room, source, status: "failed", error: message(error),
     instanceId: roomInstances.get(room) ?? "", conversationId, sessionFile: sessionFileOf(ctx),
-    workspace: path.resolve(String(ctx?.cwd || process.cwd())), spirit: "", operator: "", homeDir: "",
+    workspace: path.resolve(String(ctx?.cwd || process.cwd())), spirit: "", operator: "", homeDir: "", houseDir: "",
     context: null, controls: [], chatDelivery: false, restart: null, heartbeatSecs: 10,
     terminal: null, terminalReason: null, launcher: null, launcherReason: null, exiting: false, connected: false,
   };

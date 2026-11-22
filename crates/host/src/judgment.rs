@@ -115,10 +115,11 @@ struct Card {
 
 pub async fn execute(
     room_dir: &Path,
+    house_dir: Option<&Path>,
     room: &str,
     request: JudgmentRequest,
 ) -> Result<Value, String> {
-    let marker = read_marker(room_dir).await;
+    let marker = read_marker(room_dir, house_dir).await;
     match request {
         JudgmentRequest::RecallPolicy { grant } => {
             Ok(recall_policy_value(&recall_policy(&marker, room, grant)))
@@ -194,8 +195,8 @@ pub async fn execute(
     }
 }
 
-async fn read_marker(room_dir: &Path) -> Value {
-    akasha::room_marker::read_room_marker_async(room_dir).await
+async fn read_marker(room_dir: &Path, house_dir: Option<&Path>) -> Value {
+    akasha::room_marker::read_room_marker_async(room_dir, house_dir).await
 }
 
 fn text_at<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
@@ -251,8 +252,8 @@ fn grant_policy(
     }
 }
 
-pub(crate) async fn giga_policy(room_dir: &Path, room: &str) -> Option<String> {
-    jev_giga_policy(room_dir, room).await
+pub(crate) async fn giga_policy(room_dir: &Path, house_dir: Option<&Path>, room: &str) -> Option<String> {
+    jev_giga_policy(room_dir, house_dir, room).await
 }
 
 fn is_loopback_endpoint(value: &str) -> bool {

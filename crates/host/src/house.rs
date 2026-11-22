@@ -18,6 +18,7 @@ use sqlx::PgPool;
 use sqlx::postgres::{PgListener, PgPoolOptions};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::sync::mpsc::{Sender, channel};
 use std::thread::{Builder as ThreadBuilder, JoinHandle};
@@ -122,6 +123,8 @@ mod tests {
         OpenRoom {
             spirit: "Spirit".into(),
             operator: Some("sol".into()),
+            room_dir: PathBuf::from("room"),
+            state_dir: PathBuf::from("room/host"),
             router: Router::new(),
             cancellation: CancellationToken::new(),
             tasks,
@@ -418,6 +421,10 @@ struct Rooms {
 struct OpenRoom {
     spirit: String,
     operator: Option<String>,
+    /// The folders this room serves. A reconcile whose factory resolves
+    /// other folders rebuilds the room; `athanor move` relies on it.
+    room_dir: PathBuf,
+    state_dir: PathBuf,
     router: Router,
     cancellation: CancellationToken,
     tasks: TaskTracker,
@@ -472,6 +479,7 @@ impl Rooms {
         let room = config.room.clone();
         let spirit = config.spirit.clone();
         let operator = config.operator.clone();
+        let (room_dir, state_dir) = (config.room_dir.clone(), config.state_dir.clone());
         let cancellation = self.cancellation.child_token();
         let tasks = TaskTracker::new();
         let host = Host::new(config, self.pool.clone(), cancellation.clone(), tasks.clone())?;
@@ -482,6 +490,8 @@ impl Rooms {
             OpenRoom {
                 spirit,
                 operator,
+                room_dir,
+                state_dir,
                 router: host.router(),
                 cancellation,
                 tasks,
@@ -539,10 +549,11 @@ impl Rooms {
     }
 
     /// Makes the open rooms equal to the active records: closes each room that
-    /// left the record, rebuilds each room whose spirit or operator changed,
-    /// and opens each new room. A room that cannot open stays closed until the
-    /// next reconcile; the other rooms still open. A room key whose previous
-    /// Host still stops opens at the reconcile after that Host stopped.
+    /// left the record, rebuilds each room whose spirit, operator, room folder,
+    /// or state folder differs from what the factory builds now, and opens each
+    /// new room. A room that cannot open stays closed until the next reconcile;
+    /// the other rooms still open. A room key whose previous Host still stops
+    /// opens at the reconcile after that Host stopped.
     async fn reconcile(&self, pool: &PgPool, factory: &RoomFactory) -> Result<(), String> {
         let records = active_spirits(pool)
             .await
@@ -558,9 +569,7 @@ impl Rooms {
             .iter()
             .filter_map(|(room, open)| match wanted.get(room.as_str()) {
                 None => Some((room.clone(), true)),
-                Some(record) => (open.spirit != record.spirit
-                    || open.operator.as_deref() != Some(record.operator.as_str()))
-                .then(|| (room.clone(), false)),
+                Some(record) => open.differs(&factory(record)).then(|| (room.clone(), false)),
             })
             .collect();
 
@@ -608,6 +617,15 @@ impl Rooms {
             })
             .collect();
         Json(json!({"ok": true, "spirits": spirits})).into_response()
+    }
+}
+
+impl OpenRoom {
+    fn differs(&self, config: &HostConfig) -> bool {
+        self.spirit != config.spirit
+            || self.operator != config.operator
+            || self.room_dir != config.room_dir
+            || self.state_dir != config.state_dir
     }
 }
 

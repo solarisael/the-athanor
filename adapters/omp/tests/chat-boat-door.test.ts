@@ -124,7 +124,10 @@ function omp(options: { over?: number; handoff?: () => Promise<unknown> } = {}) 
     session: () => session,
     isTopLevel: () => true,
     tokensOverBoatLine: () => options.over ?? -1,
-    room: () => ({ dir: mkdtempSync(path.join(tmpdir(), "pulse-door-")), spirit: "Kodo" }),
+    room: () => {
+      const dir = mkdtempSync(path.join(tmpdir(), "pulse-door-"));
+      return { dir, houseDir: path.join(path.dirname(dir), "house"), spirit: "Kodo" };
+    },
   });
   startChatDoorman(pi, ctx, binding);
 

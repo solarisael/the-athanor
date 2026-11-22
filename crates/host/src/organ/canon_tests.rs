@@ -128,6 +128,7 @@ where
             bearer_token: "test-token".into(),
             room_dir: root.join("room"),
             state_dir: root.join("state"),
+            house_dir: None,
             house_id: "test-house".into(),
             room: "test-room".into(),
             spirit: "Test".into(),

@@ -220,14 +220,22 @@ fn host_component(layout: &InstallLayout, config: &RuntimeConfig, token: &str) -
 
 /// One bare HTTP/1.1 request over std TCP: the Host is loopback and the
 /// answer is small, so a client crate would be a dependency with no owner.
-pub(crate) fn health_answer(port: u16, room: &str, token: &str) -> Result<(u16, String)> {
+/// Returns the status and the body as the Host sent them.
+pub(crate) fn host_answer(
+    port: u16,
+    method: &str,
+    path: &str,
+    token: &str,
+    body: &str,
+) -> Result<(u16, String)> {
     let address: SocketAddr = format!("{LOOPBACK_HOST}:{port}").parse()?;
     let mut stream = TcpStream::connect_timeout(&address, HTTP_TIMEOUT)?;
     stream.set_read_timeout(Some(HTTP_TIMEOUT))?;
     stream.set_write_timeout(Some(HTTP_TIMEOUT))?;
     write!(
         stream,
-        "GET /room/{room}/health HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: {LOOPBACK_HOST}:{port}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
     )?;
     let mut answer = String::new();
     stream.read_to_string(&mut answer)?;
@@ -241,8 +249,12 @@ pub(crate) fn health_answer(port: u16, room: &str, token: &str) -> Result<(u16, 
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .unwrap_or("");
-    let body = body.replace(char::is_whitespace, "");
-    Ok((status, body))
+    Ok((status, body.to_owned()))
+}
+
+pub(crate) fn health_answer(port: u16, room: &str, token: &str) -> Result<(u16, String)> {
+    let (status, body) = host_answer(port, "GET", &format!("/room/{room}/health"), token, "")?;
+    Ok((status, body.replace(char::is_whitespace, "")))
 }
 
 /// Every registered keeper: installed when its config exists, running when a

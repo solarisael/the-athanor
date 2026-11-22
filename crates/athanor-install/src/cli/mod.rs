@@ -5,9 +5,11 @@
 
 pub mod chat;
 mod deploy;
+pub(crate) mod journal;
 pub mod keeper;
 pub mod launch;
 pub mod manage;
+pub mod room_move;
 pub mod spirits;
 pub mod start;
 pub mod status;
@@ -28,6 +30,7 @@ chat [--room ROOM]     Talk to a room from this terminal.\n  \
 summon ROOM SPIRIT --operator NAME\n                         Add a room to the spirit record. The running Host opens it.\n  \
 retire ROOM            Retire a room. The running Host closes it.\n  \
 rename OLD NEW [--spirit NAME]\n                         Move a room that never woke to a new room key.\n  \
+move ROOM [--file NAME]... [--offline]\n                         Move a room out of roomsRoot into the installation folder. The running Host rebuilds it.\n  \
 spirits                List the active rooms of the spirit record as JSON.\n  \
 launch-session --manifest FILE\n                         Internal: run a Host-prepared one-use terminal relaunch.\n  \
 doctor                 Check the installation.\n  \
@@ -60,6 +63,7 @@ pub fn run(arguments: Vec<String>) -> Result<ExitCode> {
         "keeper" => keeper::run(&rest),
         "chat" => chat::run(&rest).map(|()| ExitCode::SUCCESS),
         "summon" | "retire" | "rename" | "spirits" => spirits::run(mode, &rest),
+        "move" => room_move::run(&rest),
         protocol::launch::LAUNCH_SESSION_MODE => launch::run(&rest),
         "install"
         | "update"

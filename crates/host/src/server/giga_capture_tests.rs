@@ -47,6 +47,7 @@ impl CaptureRoom {
             bearer_token: "capture-test".into(),
             room_dir: directory.to_path_buf(),
             state_dir: directory.join("host"),
+            house_dir: None,
             house_id: "solarisael".into(),
             room: "kodo".into(),
             spirit: "Kodo".into(),

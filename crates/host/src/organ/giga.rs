@@ -51,7 +51,8 @@ impl GigaRoomWorker {
         }
         self.classifier_requested = enablement.classifier_enabled();
         let revision = if self.classifier_requested {
-            crate::judgment::giga_policy(&host.room_dir, &host.room).await
+            crate::judgment::giga_policy(&host.room_dir, host.house_dir.as_deref(), &host.room)
+                .await
         } else {
             None
         };
@@ -91,7 +92,11 @@ impl GigaRoomWorker {
                         (Ok(operator), Ok(classifier)) => {
                             self.unavailable = None;
                             self.rejected_policy_revision = None;
-                            Some(classifier.with_operator(operator))
+                            Some(
+                                classifier
+                                    .with_operator(operator)
+                                    .with_house_dir(host.house_dir.clone()),
+                            )
                         }
                         _ => {
                             self.unavailable = Some("classifier_config_invalid");

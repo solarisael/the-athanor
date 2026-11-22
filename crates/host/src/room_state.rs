@@ -104,8 +104,9 @@ fn complete_state(
         .ok_or_else(|| "room state root must be a JSON object".to_owned())?;
     let embodied = store.embodied_spirit(configured_spirit)?;
     root.entry("version").or_insert(json!(1));
-    root.entry("operator")
-        .or_insert_with(|| Value::String(room_marker_operator(room_dir)));
+    root.entry("operator").or_insert_with(|| {
+        Value::String(room_marker_operator(room_dir, store.house_dir()))
+    });
     root.insert(
         "agentName".into(),
         Value::String(configured_spirit.to_owned()),
@@ -131,8 +132,8 @@ fn complete_state(
     Ok(root)
 }
 
-fn room_marker_operator(room_dir: &Path) -> String {
-    akasha::room_marker::read_room_marker(room_dir)
+fn room_marker_operator(room_dir: &Path, house_dir: Option<&Path>) -> String {
+    akasha::room_marker::read_room_marker(room_dir, house_dir)
         .get("operator")
         .and_then(Value::as_str)
         .map(str::to_owned)

@@ -122,6 +122,10 @@ pub struct HostConfig {
     pub bearer_token: String,
     pub room_dir: PathBuf,
     pub state_dir: PathBuf,
+    /// The House folder, which holds the House page and the House door
+    /// lines. `None` takes the `house` folder beside `room_dir`, the layout
+    /// of a room under `roomsRoot`.
+    pub house_dir: Option<PathBuf>,
     pub house_id: String,
     pub room: String,
     pub spirit: String,
@@ -141,6 +145,11 @@ impl HostConfig {
             .join(".omp")
             .join("runtime")
             .join("athanor-house-state.json")
+    }
+
+    /// The House folder of this room; see [`akasha::room_marker::house_folder`].
+    pub fn house_folder(&self) -> Option<PathBuf> {
+        akasha::room_marker::house_folder(&self.room_dir, self.house_dir.as_deref())
     }
 
     pub fn scope(&self) -> String {

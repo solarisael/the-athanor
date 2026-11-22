@@ -37,7 +37,7 @@ function fakeSession(overrides: Record<string, unknown> = {}) {
   return { session, calls };
 }
 
-type PiOptions = { topLevel?: boolean; near?: boolean; over?: number; roomDir?: string };
+type PiOptions = { topLevel?: boolean; near?: boolean; over?: number; roomDir?: string; houseDir?: string };
 
 function fakePi(session: unknown, options: PiOptions = {}) {
   const handlers = new Map<string, Handler[]>();
@@ -53,7 +53,10 @@ function fakePi(session: unknown, options: PiOptions = {}) {
     session: () => session,
     isTopLevel: () => options.topLevel ?? true,
     tokensOverBoatLine: () => options.over ?? (options.near ? 0 : -1),
-    room: () => ({ dir: options.roomDir ?? emptyRoom(), spirit: "Kodo" }),
+    room: () => {
+      const dir = options.roomDir ?? emptyRoom();
+      return { dir, houseDir: options.houseDir ?? path.join(path.dirname(dir), "house"), spirit: "Kodo" };
+    },
   });
   const ctx = {
     sessionManager: { getSessionId: () => SESSION },
@@ -388,6 +391,21 @@ test("the House handoff-door.md speaks for every room, the room page lays over i
   await emit("agent_end", { type: "agent_end" });
   await settle();
   expect(sent[1].message.content).toBe("<athanor-attention>\nback with you, kodooo\n</athanor-attention>");
+  expect(notices).toEqual([]);
+});
+
+// Kills: a room under the installation folder that looks for the House page
+// beside itself instead of in the House folder the Host names.
+test("a room outside roomsRoot reads the House page from the named House folder", async () => {
+  const houseDir = path.join(mkdtempSync(path.join(tmpdir(), "boat-door-vault-")), "house");
+  mkdirSync(houseDir);
+  writeFileSync(path.join(houseDir, "handoff-door.md"), "## handoff\n{spirit}, the named House calls\n");
+  const roomDir = path.join(mkdtempSync(path.join(tmpdir(), "boat-door-rooms-")), "hati");
+  mkdirSync(roomDir);
+
+  const { emit, sent, notices } = fakePi(fakeSession().session, { roomDir, houseDir });
+  await emit("input", input("/handoff"));
+  expect(sent[0].message.content).toBe("<athanor-attention>\nkodooo, the named House calls\n</athanor-attention>");
   expect(notices).toEqual([]);
 });
 

@@ -41,13 +41,17 @@ struct Entry<'a> {
     error: Option<String>,
 }
 
-pub(super) fn enabled(room_dir: &std::path::Path, override_value: Option<&str>) -> bool {
+pub(super) fn enabled(
+    room_dir: &std::path::Path,
+    house_dir: Option<&std::path::Path>,
+    override_value: Option<&str>,
+) -> bool {
     if let Some(value) = override_value {
         return ["1", "true", "yes", "on"]
             .iter()
             .any(|enabled| value.trim().eq_ignore_ascii_case(enabled));
     }
-    akasha::room_marker::read_room_marker(room_dir)["recallTelemetry"] == true
+    akasha::room_marker::read_room_marker(room_dir, house_dir)["recallTelemetry"] == true
 }
 
 pub(super) fn redact_text(value: &str, private: &[&str], limit: usize) -> String {
@@ -109,6 +113,7 @@ pub(super) async fn record(
 ) -> bool {
     if !enabled(
         &state.config.room_dir,
+        state.config.house_dir.as_deref(),
         request.recall_telemetry_override.as_deref(),
     ) {
         return false;

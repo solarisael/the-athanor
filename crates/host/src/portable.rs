@@ -27,6 +27,7 @@ mod attach;
 mod control;
 #[path = "portable/home.rs"]
 mod home;
+pub use home::reference_span;
 #[path = "portable/launch.rs"]
 mod launch;
 #[path = "portable/ledger.rs"]
@@ -847,6 +848,7 @@ mod tests {
             bearer_token: "compact-test".into(),
             room_dir: directory.join("room"),
             state_dir: directory.join("host"),
+            house_dir: None,
             house_id: "test-house".into(),
             room: "test-room".into(),
             spirit: "Test".into(),
@@ -1076,6 +1078,7 @@ mod tests {
                 bearer_token: "restart-test".into(),
                 room_dir: directory.clone(),
                 state_dir: directory.join("host"),
+                house_dir: None,
                 house_id: "solarisael".into(),
                 room: "kodo".into(),
                 spirit: "Kodo".into(),

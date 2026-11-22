@@ -4,20 +4,21 @@
 //! folder in the installation folder, `<dataRoot>/rooms/<room>`, with its
 //! Host state in `host/`. These doors write nothing under `roomsRoot`.
 
+use crate::cli::journal::{Journal, pretty, undone};
 use crate::{app::installed_runtime, layout::InstallLayout};
 use akasha::spirits::{self, PendingSpirit, SpiritRecord, SpiritWrite};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use std::fs::{self, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const MARKER: &str = ".athanor-room.json";
-const ROOM_STATE: &str = ".omp/runtime/athanor-house-state.json";
+pub(crate) const MARKER: &str = ".athanor-room.json";
+pub(crate) const ROOM_STATE: &str = ".omp/runtime/athanor-house-state.json";
 /// The Host state folder inside an installation room folder.
 pub(crate) const HOST_STATE: &str = "host";
 const SUMMONED_BY: &str = "cli:summon";
@@ -189,7 +190,7 @@ fn move_room(
     respirited: bool,
 ) -> Result<()> {
     if old_dir.is_dir() {
-        journal.rename(old_dir, new_dir)?;
+        journal.move_path(old_dir, new_dir)?;
         journal.rewrite_json(&new_dir.join(MARKER), |marker| {
             marker.insert("room".into(), json!(record.room));
             marker.insert("trueName".into(), json!(record.spirit));
@@ -210,13 +211,6 @@ async fn commit(pending: PendingSpirit, journal: Journal) -> Result<SpiritWrite>
     match pending.commit().await {
         Ok(write) => Ok(write),
         Err(error) => Err(undone(anyhow!("the database COMMIT failed: {error}"), journal)),
-    }
-}
-
-fn undone(error: anyhow::Error, journal: Journal) -> anyhow::Error {
-    match journal.undo() {
-        Ok(()) => anyhow!("{error:#}; the file changes of this run were undone"),
-        Err(failures) => anyhow!("{error:#}; the undo of the file changes also failed: {failures}"),
     }
 }
 
@@ -274,114 +268,6 @@ fn room_files(journal: &mut Journal, folder: &Path, record: &SpiritRecord) -> Re
     }
 
     Ok(())
-}
-
-fn pretty(value: &impl Serialize) -> Result<Vec<u8>> {
-    let mut bytes = serde_json::to_vec_pretty(value)?;
-
-    bytes.push(b'\n');
-    Ok(bytes)
-}
-
-/// Each file change of one door, so that a failed COMMIT can undo exactly
-/// what this run did and nothing that existed before it.
-#[derive(Default)]
-struct Journal {
-    steps: Vec<Step>,
-}
-
-enum Step {
-    CreatedDir(PathBuf),
-    CreatedFile(PathBuf),
-    Rewrote { path: PathBuf, bytes: Vec<u8> },
-    Moved { from: PathBuf, to: PathBuf },
-}
-
-impl Journal {
-    fn create_dirs(&mut self, path: &Path) -> Result<()> {
-        let missing: Vec<PathBuf> = path
-            .ancestors()
-            .take_while(|folder| !folder.exists())
-            .map(Path::to_path_buf)
-            .collect();
-
-        for folder in missing.into_iter().rev() {
-            fs::create_dir(&folder).with_context(|| format!("create {}", folder.display()))?;
-            self.steps.push(Step::CreatedDir(folder));
-        }
-        Ok(())
-    }
-
-    fn create_file(&mut self, path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .with_context(|| format!("create {}", path.display()))?;
-
-        self.steps.push(Step::CreatedFile(path.to_owned()));
-        file.write_all(bytes)
-            .with_context(|| format!("write {}", path.display()))
-    }
-
-    /// A missing file stays missing here; [`room_files`] writes a fresh one.
-    fn rewrite_json(
-        &mut self,
-        path: &Path,
-        change: impl FnOnce(&mut Map<String, Value>),
-    ) -> Result<()> {
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
-        };
-        let mut document: Map<String, Value> = serde_json::from_slice(&bytes)
-            .with_context(|| format!("{} is not a JSON object", path.display()))?;
-
-        change(&mut document);
-        let rewritten = pretty(&document)?;
-        self.steps.push(Step::Rewrote {
-            path: path.to_owned(),
-            bytes,
-        });
-        fs::write(path, rewritten).with_context(|| format!("write {}", path.display()))
-    }
-
-    fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
-        fs::rename(from, to)
-            .with_context(|| format!("move {} to {}", from.display(), to.display()))?;
-        self.steps.push(Step::Moved {
-            from: from.to_owned(),
-            to: to.to_owned(),
-        });
-        Ok(())
-    }
-
-    /// Undoes the steps in reverse order and names the path of each failure.
-    fn undo(self) -> Result<(), String> {
-        let failures: Vec<String> = self
-            .steps
-            .into_iter()
-            .rev()
-            .filter_map(|step| {
-                let (path, result) = match &step {
-                    Step::CreatedDir(path) => (path.clone(), fs::remove_dir(path)),
-                    Step::CreatedFile(path) => (path.clone(), fs::remove_file(path)),
-                    Step::Rewrote { path, bytes } => (path.clone(), fs::write(path, bytes)),
-                    Step::Moved { from, to } => (to.clone(), fs::rename(to, from)),
-                };
-                result
-                    .err()
-                    .map(|error| format!("{}: {error}", path.display()))
-            })
-            .collect();
-
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            Err(failures.join("; "))
-        }
-    }
 }
 
 #[cfg(test)]

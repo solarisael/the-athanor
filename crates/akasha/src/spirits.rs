@@ -244,6 +244,44 @@ pub async fn begin_summon(
     })
 }
 
+/// Holds the record of an active room until [`PendingSpirit::commit`] and
+/// queues one notification of its room key, so that a door can move the
+/// folders of the room before a Host hears it. The record does not change.
+pub async fn begin_move(pool: &PgPool, room: &str) -> Result<PendingSpirit, SpiritError> {
+    room_key(room)?;
+
+    let mut transaction = pool.begin().await?;
+    lock(&mut transaction).await?;
+    let Some((spirit, operator)) = sqlx::query_as::<_, (String, String)>(
+        "SELECT spirit, operator FROM spirits WHERE room = $1 AND retired_at IS NULL",
+    )
+    .bind(room)
+    .fetch_optional(&mut *transaction)
+    .await?
+    else {
+        return Err(SpiritError::Refused(format!(
+            "room {room} is no active room of the spirit record"
+        )));
+    };
+    sqlx::query("SELECT pg_notify($1, $2)")
+        .bind(SPIRITS_CHANNEL)
+        .bind(room)
+        .execute(&mut *transaction)
+        .await?;
+
+    Ok(PendingSpirit {
+        transaction,
+        write: SpiritWrite {
+            change: SpiritChange::Unchanged,
+            spirit: SpiritRecord {
+                room: room.to_owned(),
+                spirit,
+                operator,
+            },
+        },
+    })
+}
+
 /// Marks the room retired. A second run changes nothing.
 pub async fn retire_spirit(pool: &PgPool, room: &str) -> Result<SpiritWrite, SpiritError> {
     room_key(room)?;

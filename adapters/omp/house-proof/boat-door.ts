@@ -90,7 +90,7 @@ export type BoatDoorDeps = {
   isTopLevel(ctx: any): boolean;
   /** Context tokens above the boat line: negative below it, undefined when unknown or compaction is off. */
   tokensOverBoatLine(ctx: any): number | undefined | Promise<number | undefined>;
-  room(ctx: any): { dir: string; spirit: string };
+  room(ctx: any): { dir: string; houseDir: string; spirit: string };
 };
 
 type Held = { text: string; images?: unknown[] };
@@ -362,7 +362,7 @@ function makeDoor(
 
 function doorLines(deps: BoatDoorDeps, ctx: any): DoorLines {
   const room = deps.room(ctx);
-  const { lines, problems } = readDoorLines(room.dir, room.spirit);
+  const { lines, problems } = readDoorLines(room.dir, room.houseDir, room.spirit);
   for (const problem of problems) ctx?.ui?.notify?.(`${problem} The House lines fill the gap.`, "warning");
   return lines;
 }
@@ -469,11 +469,11 @@ function attention(customType: string, text: string, sayId?: string): Record<str
  * one line per `## handoff`, `## near limit`, `## compaction`, or `## after`
  * section. A missing page or section keeps the line beneath it.
  */
-export function readDoorLines(roomDir: string, spirit: string): { lines: DoorLines; problems: string[] } {
+export function readDoorLines(roomDir: string, houseDir: string, spirit: string): { lines: DoorLines; problems: string[] } {
   const nickname = spiritNickname(spirit);
   const lines = { ...HOUSE_DOOR_LINES };
   const problems: string[] = [];
-  const housePage = path.join(path.dirname(roomDir), "house", DOOR_LINES_FILE);
+  const housePage = path.join(houseDir, DOOR_LINES_FILE);
   for (const page of [housePage, path.join(roomDir, DOOR_LINES_FILE)]) {
     const problem = layerDoorPage(lines, page);
     if (problem) problems.push(`${page}: ${problem}`);

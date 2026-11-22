@@ -104,7 +104,7 @@ pub(super) async fn attach(
             (Some(LauncherKind::Keeper), None)
         }
     };
-    let context = home::context(&state.config.room_dir)?;
+    let context = home::context(&state.config.room_dir, state.config.house_dir.as_deref())?;
     // Display identity is the room's bound state, read only: attach never
     // writes embodiedSpirit/operator, so it cannot skew later WS validation.
     let identity = state
@@ -258,6 +258,7 @@ pub(super) async fn attach(
         "spirit": identity.spirit,
         "operator": identity.operator,
         "homeDir": state.config.room_dir.display().to_string(),
+        "houseDir": state.config.house_folder().map(|house| house.display().to_string()),
         "instanceId": instance_id,
         "conversationId": conversation_id,
         "workspace": workspace,
@@ -289,7 +290,8 @@ pub(super) async fn context(
         .lock()
         .await
         .bound(instance_id, &conversation_id, now)?;
-    Ok(json!({"context": context_json(&home::context(&state.config.room_dir)?)}))
+    let context = home::context(&state.config.room_dir, state.config.house_dir.as_deref())?;
+    Ok(json!({"context": context_json(&context)}))
 }
 
 pub(super) async fn heartbeat(
@@ -298,7 +300,7 @@ pub(super) async fn heartbeat(
     instance_id: Uuid,
     conversation_id: String,
 ) -> Result<Value, Refusal> {
-    let revision = home::context(&state.config.room_dir)
+    let revision = home::context(&state.config.room_dir, state.config.house_dir.as_deref())
         .ok()
         .map(|context| context.revision);
     let mut registry = state.portable.lock().await;

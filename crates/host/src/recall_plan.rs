@@ -1,16 +1,54 @@
-use hearth::context::classify_retrieval_query;
+use hearth::context::{QueryRoute, classify_retrieval_query};
 use protocol::{RecallContextTurn, RecallPlanAction, RecallQueryPlan};
 
 /// Builds bounded alternatives from the current request and visible user subjects.
 /// Generated context and assistant assertions cannot establish a user subject.
+/// Each non-empty prompt gets a Search alternative for the plan judge.
 pub(crate) fn candidates(
     prompt: &str,
     history: &[RecallContextTurn],
     active_project: Option<&str>,
     working_query: Option<&str>,
     subject: Option<&RecallContextTurn>,
+    recognized_entities: &[String],
 ) -> Vec<RecallQueryPlan> {
-    let route = classify_retrieval_query(prompt, &[]);
+    let route = classify_retrieval_query(prompt, recognized_entities);
+    let mut plans = alternatives(
+        prompt,
+        &route,
+        history,
+        active_project,
+        working_query,
+        subject,
+    );
+
+    if prompt.trim().is_empty()
+        || plans
+            .iter()
+            .any(|plan| plan.action == RecallPlanAction::Search)
+    {
+        return plans;
+    }
+
+    plans.push(plan(
+        RecallPlanAction::Search,
+        prompt,
+        &route.intent,
+        Vec::new(),
+        "the message may benefit from remembered evidence",
+    ));
+
+    plans
+}
+
+fn alternatives(
+    prompt: &str,
+    route: &QueryRoute,
+    history: &[RecallContextTurn],
+    active_project: Option<&str>,
+    working_query: Option<&str>,
+    subject: Option<&RecallContextTurn>,
+) -> Vec<RecallQueryPlan> {
     let words: Vec<String> = prompt
         .split(|c: char| !c.is_alphanumeric() && c != '\'')
         .filter(|word| !word.is_empty())
@@ -244,13 +282,14 @@ mod tests {
             None,
             None,
             None,
+            &[],
         );
         assert!(
             plans
                 .iter()
                 .any(|plan| plan.action == RecallPlanAction::Skip)
         );
-        let exact = candidates("Recall memory 42", &[], None, None, None);
+        let exact = candidates("Recall memory 42", &[], None, None, None, &[]);
         assert!(
             exact
                 .iter()
@@ -262,7 +301,7 @@ mod tests {
     fn a_new_subject_does_not_require_a_retrieval_action() {
         let prompt = "We adopted a rabbit named Juniper.";
         assert_eq!(
-            candidates(prompt, &[], None, None, None)[0].action,
+            candidates(prompt, &[], None, None, None, &[])[0].action,
             RecallPlanAction::Skip
         );
         assert!(starts_new_subject(prompt));
@@ -281,7 +320,7 @@ mod tests {
             ),
             turn("assistant", "a1", "The evidence gate needs review."),
         ];
-        let plans = candidates("What about its limits?", &history, None, None, None);
+        let plans = candidates("What about its limits?", &history, None, None, None, &[]);
         assert_eq!(plans[0].action, RecallPlanAction::Search);
         assert_eq!(plans[0].source_turn_ids, ["u1"]);
         assert!(plans[0].query.contains("Orchard"));
@@ -302,6 +341,7 @@ mod tests {
             None,
             Some("Orchard retrieval evidence limits"),
             Some(&subject),
+            &[],
         );
 
         assert_eq!(plans[0].action, RecallPlanAction::Search);
@@ -314,6 +354,7 @@ mod tests {
             None,
             Some("Orchard retrieval evidence limits"),
             Some(&subject),
+            &[],
         );
         assert!(!changed[0].query.contains("Orchard"));
         assert!(changed[0].source_turn_ids.is_empty());
@@ -323,11 +364,15 @@ mod tests {
     fn subject_change_and_acknowledgement_do_not_inherit_history() {
         let history = [turn("user", "u1", "Orchard database retrieval policy")];
         for prompt in ["Which flowers did we plant?", "thanks"] {
-            let plans = candidates(prompt, &history, None, Some("Orchard retrieval"), None);
+            let plans = candidates(prompt, &history, None, Some("Orchard retrieval"), None, &[]);
             assert!(plans.iter().all(|plan| plan.source_turn_ids.is_empty()));
             assert!(plans.iter().all(|plan| !plan.query.contains("Orchard")));
         }
-        assert_eq!(candidates("thanks", &history, None, None, None).len(), 1);
+        let actions: Vec<_> = candidates("thanks", &history, None, None, None, &[])
+            .iter()
+            .map(|plan| plan.action)
+            .collect();
+        assert_eq!(actions, [RecallPlanAction::Skip, RecallPlanAction::Search]);
     }
 
     #[test]
@@ -336,7 +381,7 @@ mod tests {
             "What is the kindest thing I've ever said?",
             "Where did we meet?",
         ] {
-            let plans = candidates(prompt, &[], None, None, None);
+            let plans = candidates(prompt, &[], None, None, None, &[]);
             assert_eq!(plans[0].action, RecallPlanAction::Search);
             assert_eq!(plans[0].intent, "memory_lookup");
             assert_eq!(plans[0].query, prompt);
@@ -352,6 +397,7 @@ mod tests {
             None,
             None,
             None,
+            &[],
         );
         assert_eq!(plans.len(), 1);
         assert!(plans[0].source_turn_ids.is_empty());
@@ -360,7 +406,7 @@ mod tests {
     #[test]
     fn a_temporal_follow_up_keeps_the_user_subject() {
         let history = [turn("user", "u1", "How did we change Orchard retrieval?")];
-        let plans = candidates("From our last session?", &history, None, None, None);
+        let plans = candidates("From our last session?", &history, None, None, None, &[]);
 
         assert_eq!(plans[0].action, RecallPlanAction::Search);
         assert_eq!(plans[0].source_turn_ids, ["u1"]);
@@ -373,9 +419,64 @@ mod tests {
 
     #[test]
     fn query_bounds_count_unicode_scalars() {
-        let plans = candidates(&"界".repeat(1400), &[], None, None, None);
+        let plans = candidates(&"界".repeat(1400), &[], None, None, None, &[]);
         assert!(plans.iter().all(|plan| plan.query.chars().count() <= 1024));
         assert!(plans.iter().all(|plan| plan.subject_terms.len() <= 16));
         assert!(plans.len() <= 4);
+    }
+
+    #[test]
+    fn a_back_reference_without_a_subject_can_still_search() {
+        let plans = candidates("What about that one?", &[], None, None, None, &[]);
+
+        assert!(
+            plans
+                .iter()
+                .any(|plan| plan.action == RecallPlanAction::Search)
+        );
+    }
+
+    #[test]
+    fn casual_contact_can_still_search() {
+        let plans = candidates("Nice weather today.", &[], None, None, None, &[]);
+
+        assert_eq!(plans[0].intent, "casual_contact");
+        assert_eq!(plans[0].action, RecallPlanAction::Skip);
+        assert!(
+            plans
+                .iter()
+                .any(|plan| plan.action == RecallPlanAction::Search)
+        );
+    }
+
+    #[test]
+    fn a_recognized_entity_with_lookup_language_is_an_entity_lookup() {
+        let prompt = "Tell me about Juniper.";
+        let plans = candidates(prompt, &[], None, None, None, &["Juniper".to_owned()]);
+
+        assert_eq!(plans[0].intent, "entity_lookup");
+        assert_eq!(plans[0].action, RecallPlanAction::Search);
+
+        let unresolved = candidates(prompt, &[], None, None, None, &[]);
+
+        assert!(unresolved.iter().all(|plan| plan.intent != "entity_lookup"));
+    }
+
+    #[test]
+    fn an_acknowledgement_offers_search_after_skip_without_history() {
+        let history = [turn("user", "u1", "Orchard database retrieval policy")];
+        let plans = candidates(
+            "thanks",
+            &history,
+            None,
+            Some("Orchard retrieval"),
+            None,
+            &[],
+        );
+        let actions: Vec<_> = plans.iter().map(|plan| plan.action).collect();
+
+        assert_eq!(actions, [RecallPlanAction::Skip, RecallPlanAction::Search]);
+        assert_eq!(plans[1].query, "thanks");
+        assert!(plans.iter().all(|plan| plan.source_turn_ids.is_empty()));
     }
 }

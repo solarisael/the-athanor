@@ -387,7 +387,6 @@ async function runCase(
       ? analysis.route as Record<string, unknown> : {};
     routeStage.status = "ok" satisfies StageStatus;
     routeStage.intent = text(route.intent);
-    routeStage.shouldAutoRecall = route.shouldAutoRecall === true;
     routeStage.termCount = Array.isArray(route.terms) ? route.terms.length : 0;
     routeStage.requiredTermCount = Array.isArray(route.requiredTerms) ? route.requiredTerms.length : 0;
     routeStage.reasonCount = Array.isArray(route.reasons) ? route.reasons.length : 0;

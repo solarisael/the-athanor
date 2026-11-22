@@ -95,7 +95,7 @@ fn route_summary(route: Option<&Value>) -> Value {
     let Some(route) = route else {
         return Value::Null;
     };
-    json!({"intent":route["intent"],"should_auto_recall":route["shouldAutoRecall"]==true,"lanes":route["lanes"],
+    json!({"intent":route["intent"],"lanes":route["lanes"],
         "reasons":array(&route["reasons"]),"term_count":array(&route["terms"]).len(),
         "required_term_count":array(&route["requiredTerms"]).len(),"date_count":array(&route["dateTokens"]).len(),
         "recognized_entity_count":array(&route["recognizedEntities"]).len()})
@@ -215,7 +215,8 @@ pub(super) fn diagnostic(
     diagnostic["owner"] = json!({"component":"host","path":"crates/host/src/server/context_session/recall.rs","symbol":"retrieve"});
     diagnostic["expected"] =
         json!({"hidden_context":true,"display":false,"outcome":"injected_or_fail_open"});
-    diagnostic["observed"] = json!({"outcome":"failed_open","route_intent":route.map(|route|&route["intent"]),"route_should_auto_recall":route.is_some_and(|route|route["shouldAutoRecall"]==true)});
+    diagnostic["observed"] =
+        json!({"outcome":"failed_open","route_intent":route.map(|route|&route["intent"])});
     let mut evidence = array(&diagnostic["evidence"]).to_vec();
     evidence.push(json!({"kind":"automatic_context_failure","cause":redact_value(failure.clone(),&private,0)}));
     diagnostic["evidence"] = json!(evidence);

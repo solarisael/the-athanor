@@ -17,7 +17,7 @@ Set CARGO_TARGET_DIR before you run it if the checkout needs its own target.
 --with-retention  Also run the Insula retention test. It waits 300 seconds.
 
 Run this script as its own process. A shell that runs it in-process skips the cleanup.
-The three tests that need a NATS server do not run.
+The four tests that need a NATS server do not run.
 EOF
 }
 
@@ -107,6 +107,7 @@ run workspace athanor_canon_test --workspace --exclude athanor-pulse --no-fail-f
     --skip generated_credentials_enforce_delivery_and_reply_boundaries \
     --skip crane_outbox_restart_dedup_receipt_replay_expiry_and_poison_contract \
     --skip serve_delivers_until_cancelled_and_leaves_no_lease_behind \
+    --skip retired_rooms_close_together_and_forget_their_hallway_consumers \
     --skip automatic_retention_fires_after_real_startup_delay_and_preserves_recent_rows \
     --skip supersession_refuses_foreign_and_missing_predecessors_atomically \
     --skip hallway_temp_session_exchanges_messages_without_persistent_state \

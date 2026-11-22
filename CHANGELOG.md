@@ -71,6 +71,17 @@ the exact implementation record.
 - The automatic context budget is 12 s on every platform. Before this change,
   the Host kept 2 s off Windows and the adapter kept 8 s. The Host used the
   earlier deadline, so automatic Recall rarely completed on Linux.
+- A retired room no longer holds the other rooms. The Host closed rooms one at
+  a time and waited for each one, and the broker refused `athanor-host` the
+  delete of a hallway consumer, so each retired room held every later change
+  of the spirit record for at least 10 s and kept its consumer. The Host now
+  closes each room in a task of its own and gives the delete 5 s. The installer
+  and the Nix module grant `athanor-host`
+  `$JS.API.CONSUMER.DELETE.ATHANOR_HALLWAY.>`, so a retired room's consumer
+  leaves the stream.
+- The `athanor` Host writes its log to stderr, which journald keeps under
+  systemd. The default level is `info`; `RUST_LOG` changes it. Before this
+  change, the Host log went nowhere.
 
 ## [0.7.0] - 2026-11-14
 

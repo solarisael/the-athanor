@@ -220,7 +220,7 @@ fn host_component(layout: &InstallLayout, config: &RuntimeConfig, token: &str) -
 
 /// One bare HTTP/1.1 request over std TCP: the Host is loopback and the
 /// answer is small, so a client crate would be a dependency with no owner.
-fn health_answer(port: u16, room: &str, token: &str) -> Result<(u16, String)> {
+pub(crate) fn health_answer(port: u16, room: &str, token: &str) -> Result<(u16, String)> {
     let address: SocketAddr = format!("{LOOPBACK_HOST}:{port}").parse()?;
     let mut stream = TcpStream::connect_timeout(&address, HTTP_TIMEOUT)?;
     stream.set_read_timeout(Some(HTTP_TIMEOUT))?;

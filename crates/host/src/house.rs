@@ -16,15 +16,15 @@ use protocol::HOST_ROOM_PATH_PREFIX;
 use serde_json::json;
 use sqlx::PgPool;
 use sqlx::postgres::{PgListener, PgPoolOptions};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::sync::mpsc::{Sender, channel};
 use std::thread::{Builder as ThreadBuilder, JoinHandle};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::runtime::Builder as RuntimeBuilder;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::{Notify, RwLock, oneshot};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tower::ServiceExt;
@@ -39,6 +39,8 @@ const LISTEN_BACKOFF: [Duration; 4] = [
     Duration::from_secs(15),
     Duration::from_secs(30),
 ];
+/// How long a closed room waits for the broker to remove its hallway consumer.
+const FORGET_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Builds the configuration of one room from its spirit record.
 pub type RoomFactory = Arc<dyn Fn(&SpiritRecord) -> HostConfig + Send + Sync>;
@@ -114,6 +116,65 @@ mod tests {
         };
 
         assert_eq!(runtime.wait().unwrap_err(), "internal Host failure");
+    }
+
+    fn open_room(tasks: TaskTracker) -> OpenRoom {
+        OpenRoom {
+            spirit: "Spirit".into(),
+            operator: Some("sol".into()),
+            router: Router::new(),
+            cancellation: CancellationToken::new(),
+            tasks,
+        }
+    }
+
+    async fn until_stopped(rooms: &Rooms, room: &str) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while rooms.is_closing(room) {
+                rooms.stopped.notified().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("room {room} never stopped"));
+    }
+
+    // Kills: a close that waits for the tasks of its room, so that one room
+    // that stops slowly holds the follower of the spirit record and every
+    // other room; and a room key that is free again while its Host still runs.
+    #[tokio::test]
+    async fn a_room_that_stops_slowly_holds_no_other_room() {
+        let house = HouseConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            bearer_token: "rooms-test".into(),
+            house_id: "solarisael".into(),
+            database_url: None,
+            nats_url: None,
+            nats_auth: None,
+        };
+        let rooms = Rooms::new(house, None, CancellationToken::new(), TaskTracker::new());
+        // A room task that ignores its room token.
+        let release = CancellationToken::new();
+        let slow = TaskTracker::new();
+        slow.spawn(release.clone().cancelled_owned());
+        {
+            let mut table = rooms.table.write().await;
+            table.insert("hugo".into(), open_room(slow));
+            table.insert("salvia".into(), open_room(TaskTracker::new()));
+        }
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            rooms.close("hugo", false).await;
+            rooms.close("salvia", false).await;
+        })
+        .await
+        .expect("a close waits for no task of its room");
+        assert!(rooms.router("hugo").await.is_none());
+        assert!(rooms.router("salvia").await.is_none());
+        until_stopped(&rooms, "salvia").await;
+        assert!(rooms.is_closing("hugo"));
+
+        release.cancel();
+        until_stopped(&rooms, "hugo").await;
     }
 }
 
@@ -194,7 +255,8 @@ async fn serve_house(
         .map_err(|error| format!("the Athanor Host server failed: {error}"));
     cancellation.cancel();
     // The follower of the spirit record stops first, so that no room opens
-    // while the rooms close.
+    // while the rooms close; a room that already left the table finishes its
+    // close on the same tracker.
     tasks.close();
     tasks.wait().await;
     opened.rooms.close_all().await;
@@ -238,7 +300,12 @@ async fn open_house(
             ));
         }
     }
-    let rooms = Rooms::new(house.clone(), pool.clone(), cancellation.clone());
+    let rooms = Rooms::new(
+        house.clone(),
+        pool.clone(),
+        cancellation.clone(),
+        tasks.clone(),
+    );
     match source {
         RoomSource::Configured(configs) => {
             for config in configs {
@@ -335,9 +402,17 @@ async fn import_seed(pool: &PgPool, seed: &[HostConfig]) -> Result<(), String> {
 #[derive(Clone)]
 struct Rooms {
     table: Arc<RwLock<BTreeMap<String, OpenRoom>>>,
+    /// The rooms that left `table` and still stop. A room key opens again
+    /// only after its previous Host stopped.
+    closing: Arc<Mutex<BTreeSet<String>>>,
+    /// Wakes the follower of the spirit record when a closing room stopped,
+    /// so that a room key that waited for it opens.
+    stopped: Arc<Notify>,
     house: Arc<HouseConfig>,
     pool: Option<PgPool>,
     cancellation: CancellationToken,
+    /// The House tracker, which runs the close of each room.
+    tasks: TaskTracker,
 }
 
 struct OpenRoom {
@@ -349,12 +424,20 @@ struct OpenRoom {
 }
 
 impl Rooms {
-    fn new(house: HouseConfig, pool: Option<PgPool>, cancellation: CancellationToken) -> Self {
+    fn new(
+        house: HouseConfig,
+        pool: Option<PgPool>,
+        cancellation: CancellationToken,
+        tasks: TaskTracker,
+    ) -> Self {
         Self {
             table: Arc::default(),
+            closing: Arc::default(),
+            stopped: Arc::default(),
             house: Arc::new(house),
             pool,
             cancellation,
+            tasks,
         }
     }
 
@@ -407,8 +490,10 @@ impl Rooms {
         Ok(())
     }
 
-    /// Stops the room and waits for its tasks. `forget` also removes the
-    /// hallway consumer, for a room that left the spirit record.
+    /// Takes the room out of the table at once and stops it in a task of its
+    /// own, so that a room that stops slowly holds neither the follower of the
+    /// spirit record nor any other room. `forget` also removes the hallway
+    /// consumer, for a room that left the spirit record.
     async fn close(&self, room: &str, forget: bool) {
         let Some(open) = self.table.write().await.remove(room) else {
             return;
@@ -416,10 +501,31 @@ impl Rooms {
 
         open.cancellation.cancel();
         open.tasks.close();
-        open.tasks.wait().await;
-        if forget {
-            forget_hallway_consumer(&self.house, room).await;
-        }
+        self.closing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(room.to_owned());
+        let (rooms, room) = (self.clone(), room.to_owned());
+        self.tasks.spawn(async move {
+            open.tasks.wait().await;
+            if forget {
+                forget_hallway_consumer(&rooms.house, &room).await;
+            }
+            rooms
+                .closing
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&room);
+            rooms.stopped.notify_one();
+            tracing::info!(%room, "closed an Athanor Host room");
+        });
+    }
+
+    fn is_closing(&self, room: &str) -> bool {
+        self.closing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(room)
     }
 
     async fn close_all(&self) {
@@ -435,7 +541,8 @@ impl Rooms {
     /// Makes the open rooms equal to the active records: closes each room that
     /// left the record, rebuilds each room whose spirit or operator changed,
     /// and opens each new room. A room that cannot open stays closed until the
-    /// next reconcile; the other rooms still open.
+    /// next reconcile; the other rooms still open. A room key whose previous
+    /// Host still stops opens at the reconcile after that Host stopped.
     async fn reconcile(&self, pool: &PgPool, factory: &RoomFactory) -> Result<(), String> {
         let records = active_spirits(pool)
             .await
@@ -459,10 +566,11 @@ impl Rooms {
 
         for (room, forget) in stale {
             self.close(&room, forget).await;
-            tracing::info!(%room, "closed an Athanor Host room");
         }
         for record in &records {
-            if self.table.read().await.contains_key(&record.room) {
+            if self.is_closing(&record.room)
+                || self.table.read().await.contains_key(&record.room)
+            {
                 continue;
             }
             match self.open(factory(record)).await {
@@ -620,16 +728,22 @@ async fn follow(
             return reason;
         }
         // `Ok(None)`: the connection dropped and came back. The reconcile at
-        // the top of the loop catches up with the lost notifications.
-        match listener.try_recv().await {
-            Ok(_) => while listener.next_buffered().is_some() {},
-            Err(error) => return format!("the LISTEN on {SPIRITS_CHANNEL} failed: {error}"),
+        // the top of the loop catches up with the lost notifications. A room
+        // that stopped also reconciles again, so that a room key that waited
+        // for its previous Host opens.
+        tokio::select! {
+            received = listener.try_recv() => match received {
+                Ok(_) => while listener.next_buffered().is_some() {},
+                Err(error) => return format!("the LISTEN on {SPIRITS_CHANNEL} failed: {error}"),
+            },
+            () = rooms.stopped.notified() => {}
         }
     }
 }
 
 /// A room that left the spirit record must not keep its durable consumer on
-/// the hallway stream. A missing consumer or stream is not an error.
+/// the hallway stream. A missing consumer or stream is not an error. A broker
+/// that does not answer within `FORGET_TIMEOUT` leaves the consumer in place.
 async fn forget_hallway_consumer(house: &HouseConfig, room: &str) {
     let Some(url) = house.nats_url.as_deref() else {
         return;
@@ -659,8 +773,15 @@ async fn forget_hallway_consumer(house: &HouseConfig, room: &str) {
                 _ => Err(error.to_string()),
             },
         }
-    }
-    .await;
+    };
+    let removed = tokio::time::timeout(FORGET_TIMEOUT, removed)
+        .await
+        .unwrap_or_else(|_| {
+            Err(format!(
+                "the broker did not answer within {} s",
+                FORGET_TIMEOUT.as_secs()
+            ))
+        });
 
     if let Err(reason) = removed {
         tracing::warn!(

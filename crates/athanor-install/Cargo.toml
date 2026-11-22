@@ -35,6 +35,7 @@ chrono.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true }
 tokio-tungstenite = "0.28"
+tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]

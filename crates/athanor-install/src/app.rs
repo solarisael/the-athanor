@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use protocol::LOOPBACK_HOST;
 use std::{
     env, fs,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
     path::PathBuf,
     sync::Arc,
 };
@@ -71,7 +71,7 @@ impl RoomPlaces {
 
 /// The House settings, and the spirit record as the source of the rooms. The
 /// `rooms` of runtime.json only fill an empty record once.
-fn host_rooms(
+pub(crate) fn host_rooms(
     layout: &InstallLayout,
     config: &RuntimeConfig,
     secrets: &RuntimeSecrets,
@@ -139,6 +139,16 @@ impl Drop for RunOwner {
 }
 
 pub fn run() -> Result<()> {
+    // The Host logs to stderr, which journald keeps for the systemd unit.
+    // RUST_LOG overrides the default level.
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_ansi(io::stderr().is_terminal())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let layout = InstallLayout::from_environment()?;
     let (config, secrets) = installed_runtime(&layout)?;
     crate::service::ensure_running(&config)?;

@@ -242,8 +242,12 @@ impl RecallPolicySession {
         let named_skip = planned_action == Some(RecallPlanAction::Skip)
             && resolved_mode == RecallResolvedMode::Conversation
             && !facts.query_route.recognized_entities.is_empty();
+        // The operator ruled that a pinned conversation mode (Bard) searches on
+        // each message. Auto keeps the Skip of the plan.
+        let searches_each_message = requested_mode == RecallRequestedMode::Conversation;
         let eligible = resolved_mode != RecallResolvedMode::Quiet
             && (recovery_due
+                || searches_each_message
                 || match planned_action {
                     Some(RecallPlanAction::Search) => true,
                     Some(RecallPlanAction::Skip) => named_skip,
@@ -314,6 +318,8 @@ impl RecallPolicySession {
             Some("query-plan-search")
         } else if eligible && named_skip {
             Some("named-entity-skip")
+        } else if eligible && searches_each_message {
+            Some("conversation-searches-each-message")
         } else if eligible && stale {
             Some("stale-working-set")
         } else {
@@ -871,7 +877,7 @@ mod tests {
     #[test]
     fn a_skipped_new_subject_retires_old_working_evidence() {
         let mut session = session(RecallResolvedMode::Conversation, 0);
-        session.requested_mode = RecallRequestedMode::Conversation;
+        session.requested_mode = RecallRequestedMode::Auto;
         session.complete_refresh(
             protocol::RecallRefreshCompletion {
                 query_terms: vec!["orchard".into(), "retrieval".into(), "policy".into()],
@@ -888,7 +894,7 @@ mod tests {
         plan.intent = "general".into();
         plan.query = "We adopted a rabbit named Juniper.".into();
         plan.subject_terms = vec!["adopted".into(), "rabbit".into(), "juniper".into()];
-        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+        let decision = session.evaluate(RecallRequestedMode::Auto, input);
 
         assert!(decision.action.clears_working_set());
         assert!(!decision.action.refreshes());
@@ -901,7 +907,7 @@ mod tests {
         let mut input = planned_facts(protocol::RecallPlanAction::Skip);
         input.query_route.intent = "memory_lookup".into();
         input.query_route.terms = vec!["remember".into(), "jasmine".into(), "tea".into()];
-        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+        let decision = session.evaluate(RecallRequestedMode::Auto, input);
 
         assert!(!decision.action.refreshes());
     }
@@ -917,6 +923,25 @@ mod tests {
     }
 
     #[test]
+    fn a_skip_plan_with_a_canon_name_searches_in_auto_conversation_mode() {
+        let mut named = session(RecallResolvedMode::Conversation, 0);
+        let mut input = planned_facts(protocol::RecallPlanAction::Skip);
+        input.query_route.recognized_entities = vec!["orchard".into()];
+        let decision = named.evaluate(RecallRequestedMode::Auto, input);
+
+        assert_eq!(decision.resolved_mode, RecallResolvedMode::Conversation);
+        assert!(decision.action.refreshes());
+
+        let mut unnamed = session(RecallResolvedMode::Conversation, 0);
+        let decision = unnamed.evaluate(
+            RecallRequestedMode::Auto,
+            planned_facts(protocol::RecallPlanAction::Skip),
+        );
+
+        assert!(!decision.action.refreshes());
+    }
+
+    #[test]
     fn a_skip_plan_with_a_canon_name_stays_a_skip_in_work_mode() {
         let mut session = session(RecallResolvedMode::Work, 0);
         let mut input = planned_facts(protocol::RecallPlanAction::Skip);
@@ -924,6 +949,112 @@ mod tests {
         let decision = session.evaluate(RecallRequestedMode::Work, input);
 
         assert!(!decision.action.refreshes());
+    }
+
+    fn refreshed_session(
+        requested_mode: RecallRequestedMode,
+        resolved_mode: RecallResolvedMode,
+    ) -> RecallPolicySession {
+        let mut session = session(resolved_mode, 0);
+        session.requested_mode = requested_mode;
+        session.complete_refresh(
+            protocol::RecallRefreshCompletion {
+                query_terms: vec!["orchard".into(), "retrieval".into(), "policy".into()],
+                refresh_reason: "query-plan-search".into(),
+                entries: 1,
+                has_working_set: true,
+                warning: None,
+            },
+            "before".into(),
+        );
+        session
+    }
+
+    fn plain_message(action: protocol::RecallPlanAction) -> RecallPolicyFacts {
+        let mut input = planned_facts(action);
+        input.working_set_present = true;
+        let plan = input.query_plan.as_mut().unwrap();
+        plan.intent = "general".into();
+        plan.query = "The orchard retrieval policy has limits.".into();
+        input
+    }
+
+    #[test]
+    fn requested_conversation_searches_a_skip_plan_with_the_message_text() {
+        let mut session = refreshed_session(
+            RecallRequestedMode::Conversation,
+            RecallResolvedMode::Conversation,
+        );
+        let decision = session.evaluate(
+            RecallRequestedMode::Conversation,
+            plain_message(protocol::RecallPlanAction::Skip),
+        );
+
+        assert!(decision.action.refreshes());
+        assert_eq!(
+            decision.refresh_reason.as_deref(),
+            Some("conversation-searches-each-message")
+        );
+        assert_eq!(decision.query, "The orchard retrieval policy has limits.");
+    }
+
+    #[test]
+    fn requested_conversation_searches_a_reuse_plan() {
+        let mut session = refreshed_session(
+            RecallRequestedMode::Conversation,
+            RecallResolvedMode::Conversation,
+        );
+        let decision = session.evaluate(
+            RecallRequestedMode::Conversation,
+            plain_message(protocol::RecallPlanAction::Reuse),
+        );
+
+        assert!(decision.action.refreshes());
+        assert_eq!(
+            decision.refresh_reason.as_deref(),
+            Some("conversation-searches-each-message")
+        );
+    }
+
+    #[test]
+    fn auto_resolved_to_conversation_keeps_a_skip_plan_a_skip() {
+        let mut session =
+            refreshed_session(RecallRequestedMode::Auto, RecallResolvedMode::Conversation);
+        let decision = session.evaluate(
+            RecallRequestedMode::Auto,
+            plain_message(protocol::RecallPlanAction::Skip),
+        );
+
+        assert_eq!(decision.resolved_mode, RecallResolvedMode::Conversation);
+        assert!(!decision.action.refreshes());
+    }
+
+    #[test]
+    fn requested_work_keeps_a_skip_plan_a_skip() {
+        let mut session = refreshed_session(RecallRequestedMode::Work, RecallResolvedMode::Work);
+        let decision = session.evaluate(
+            RecallRequestedMode::Work,
+            plain_message(protocol::RecallPlanAction::Skip),
+        );
+
+        assert!(!decision.action.refreshes());
+    }
+
+    #[test]
+    fn requested_conversation_lets_a_specific_reason_win() {
+        let mut session = refreshed_session(
+            RecallRequestedMode::Conversation,
+            RecallResolvedMode::Conversation,
+        );
+        let mut input = plain_message(protocol::RecallPlanAction::Skip);
+        input.active_project = Some("orchard".into());
+        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+
+        assert!(decision.action.refreshes());
+        assert_eq!(
+            decision.refresh_reason.as_deref(),
+            Some("active-project-change")
+        );
     }
 
     #[test]

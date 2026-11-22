@@ -37,6 +37,7 @@ the exact implementation record.
 - `substrate/deploy-local.sh` no longer asks you to close the OMP sessions first. At the end, it lists the open sessions and tells you to restart them.
 - `substrate/deploy-local.sh` refuses to run inside a shell that is not its own process, because such a shell skips the recovery step.
 - Orihon resolves the hosted folder through the OMP role `@orihon_fold` when no model is specified.
+- When the operator sets conversation mode (Bard), Recall now searches on each message. A Skip plan or a Reuse plan no longer stops the search. The refresh reason is `conversation-searches-each-message`. Auto mode keeps the Skip plan.
 - Orihon refuses an unresolved role. It no longer selects Sonnet by default.
 - Schema 48 puts canon on the operator axis with a subject, scope, and minimum elevation.
 - Spellbooks moved from room files into PostgreSQL. Schema 49 adds table

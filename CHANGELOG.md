@@ -21,12 +21,12 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
-- The Recall planner now gives a Search plan for each message that is not empty. Before this change, an acknowledgement, a casual message, or a back-reference without a subject got a Skip plan only. The plan judge now selects between the plans. In the quiet mode, the Host does not ask the plan judge and uses the first plan.
-- The Recall planner now gets the entities that the Host resolved for the message. A message that names one known entity with lookup language now gets the `entity_lookup` intent.
-- The route of a query no longer has the field `shouldAutoRecall`. Recall telemetry no longer writes the keys `should_auto_recall` and `route_should_auto_recall`. No part of the House used these values to make a decision.
 - Each Recall card that Jev scores now has a label: the title of the memory and the heading of the section. Before this change, Jev got the excerpt only.
 - Jev now scores each of the 64 candidates of the Recall pool. The Recall packet has its own limit of 65,536 bytes. Before this change, a limit of 32,768 bytes removed 16 to 18 candidates from each packet.
 - In conversation mode, a message that names a canon entity now gets a Recall search when the plan judge selects Skip. Other Skip plans stay a skip.
+- The Recall planner now gives a Search plan for each message that is not empty. Before this change, an acknowledgement, a casual message, or a back-reference without a subject got a Skip plan only. The plan judge now selects between the plans. In the quiet mode, the Host does not ask the plan judge and uses the first plan.
+- The Recall planner now gets the entities that the Host resolved for the message. A message that names one known entity with lookup language now gets the `entity_lookup` intent.
+- The route of a query no longer has the field `shouldAutoRecall`. Recall telemetry no longer writes the keys `should_auto_recall` and `route_should_auto_recall`. No part of the House used these values to make a decision.
 - The Host and the GIGA worker no longer refuse a TypeSafe request when its text looks like a secret. The check matched ordinary prose, such as `password:` or a word that ends in `sk-`, and refused 59 of 533 Recall reranks in one room. An empty query, prompt, or excerpt now has its own refusal reason.
 - Each House tool now refuses an argument key that it does not know. The error names the key and lists the accepted keys. Before this change, the tool ignored the key and reported success.
 - Orihon Fold keeps the current prefix when one background merge makes a small change.

@@ -274,6 +274,7 @@ fn parse_requested(value: &str) -> Result<RecallRequestedMode, String> {
         "auto" => Ok(RecallRequestedMode::Auto),
         "conversation" => Ok(RecallRequestedMode::Conversation),
         "work" => Ok(RecallRequestedMode::Work),
+        "mixed" => Ok(RecallRequestedMode::Mixed),
         "quiet" => Ok(RecallRequestedMode::Quiet),
         other => Err(format!("unknown recallPolicy.requestedMode {other}")),
     }
@@ -706,5 +707,47 @@ fn atomic_text_write(path: &Path, text: &str) -> Result<(), String> {
             "cannot atomically replace {}: {error}",
             path.display()
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RoomStateStore;
+    use protocol::{RecallRequestedMode, RecallResolvedMode};
+    use serde_json::{Value, json};
+    use std::fs;
+
+    #[test]
+    fn the_room_file_keeps_an_older_requested_mode_and_round_trips_mixed() {
+        let dir = std::env::temp_dir().join(format!("athanor-store-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("fixture directory");
+        let path = dir.join("athanor-house-state.json");
+        let older = json!({
+            "room": "room-one",
+            "recallPolicy": {
+                "requestedMode": "work", "resolvedMode": "work", "activeProject": null,
+                "resolutionReason": "explicit-override", "lastRefreshReason": null,
+                "lastRefreshAt": null, "workingSetEntries": 0, "recoveryPending": false,
+                "recoveryTerms": [], "degraded": null, "updatedAt": null
+            }
+        });
+        fs::write(&path, serde_json::to_vec(&older).unwrap()).expect("state file");
+        let store = RoomStateStore::new(path.clone(), "room-one".into());
+        let loaded = store.load().expect("an older room file loads");
+
+        assert_eq!(loaded.requested_mode, RecallRequestedMode::Work);
+
+        let mut mixed = loaded;
+        mixed.requested_mode = RecallRequestedMode::Mixed;
+        mixed.resolved_mode = RecallResolvedMode::Mixed;
+        store.write_policy(&mixed).expect("mixed policy writes");
+        let written: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let reloaded = store.load().expect("mixed room file loads");
+
+        assert_eq!(written["recallPolicy"]["requestedMode"], "mixed");
+        assert_eq!(reloaded.requested_mode, RecallRequestedMode::Mixed);
+        assert_eq!(reloaded.resolved_mode, RecallResolvedMode::Mixed);
+
+        fs::remove_dir_all(dir).expect("fixture cleanup");
     }
 }

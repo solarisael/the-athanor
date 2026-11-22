@@ -1,13 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { MODE_COMMANDS, MODE_DOOR_LINES, modeDoor, resetModeDoors } from "../house-proof/mode-door.ts";
+import { RECALL_POLICY_MODES } from "../house-proof/recall-policy.ts";
 
 afterEach(() => resetModeDoors());
 
 // Kills: a command missing a mode, or a mode no command reaches.
 test("every mode command names a requested mode and every non-auto mode has a command", () => {
-  expect(MODE_COMMANDS).toEqual({ magus: "work", bard: "conversation", warlock: "conversation", rogue: "quiet", warrior: "auto" });
-  for (const mode of ["work", "conversation", "quiet"]) expect(Object.values(MODE_COMMANDS)).toContain(mode);
+  expect(MODE_COMMANDS).toEqual({ magus: "work", paladin: "mixed", bard: "conversation", warlock: "conversation", rogue: "quiet", warrior: "auto" });
+  for (const mode of RECALL_POLICY_MODES.filter((mode) => mode !== "auto")) expect(Object.values(MODE_COMMANDS)).toContain(mode);
 });
 
 // Kills: the door ringing every turn, staying silent on a real transition, or

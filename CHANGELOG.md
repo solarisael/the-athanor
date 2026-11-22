@@ -60,6 +60,7 @@ the exact implementation record.
 - `spellbook_write` (Host command `athanor.spellbook.write`) replaces this
   room's page or the House page whole after validation. A House page that
   would break a room page is refused, and the refusal names the room.
+- The command `/paladin` sets the Recall mode to mixed. The `recall_policy` tool also accepts `mixed` as a requested mode.
 - `substrate/deploy-local.sh` updates a provisioned Linux House.
   It keeps a database backup and the previous release. It checks health after the update.
 - Schema 50 adds table `spirit_texts`. It holds the identity contract, the presence text, and the spirit text of each spirit, with every revision. The Host does not read this table yet. `substrate/import-spirit-texts.sh` copies text files into the table and proves each copy by SHA-256.

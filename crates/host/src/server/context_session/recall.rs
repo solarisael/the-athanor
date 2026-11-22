@@ -132,6 +132,7 @@ pub(super) async fn evaluate(
         request.active_project.as_deref(),
         working_query,
         subject,
+        &analysis.route.recognized_entities,
     );
     let mut query_plan = plans.first().cloned();
     let mut planning = json!({"status":"deterministic","fallbackUsed":false});

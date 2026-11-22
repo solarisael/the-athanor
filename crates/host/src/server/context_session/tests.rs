@@ -1058,7 +1058,7 @@ async fn native_recall_export_is_opt_in_and_preserves_the_record_contract() {
     request.recall_telemetry_override = Some("0".into());
     assert!(!telemetry::record(&fixture.state, &fixture.meta, &request, observation()).await);
     request.recall_telemetry_override = Some("yes".into());
-    let route = json!({"intent":"memory_lookup","terms":["private"],"shouldAutoRecall":true});
+    let route = json!({"intent":"memory_lookup","terms":["private"]});
     let error = format!(
         "{} Bearer secret-token password=hunter2 http://user:pass@localhost/",
         request.prompt

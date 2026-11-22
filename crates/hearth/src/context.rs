@@ -391,7 +391,6 @@ pub struct QueryRoute {
     pub recognized_entities: Vec<String>,
     pub entity_resolution_suggested: bool,
     pub recall_query: String,
-    pub should_auto_recall: bool,
     pub lanes: QueryLaneSet,
     pub reasons: Vec<String>,
 }
@@ -692,7 +691,6 @@ pub fn classify_retrieval_query(query: &str, recognized_entities: &[String]) -> 
     } else {
         route.query.clone()
     };
-    route.should_auto_recall = route.intent != "casual_contact";
     route.lanes = QueryLaneSet::empty()
         .with_if(route.intent != "casual_contact", QueryLane::Lexical)
         .with_if(route.intent != "casual_contact", QueryLane::Candidates)

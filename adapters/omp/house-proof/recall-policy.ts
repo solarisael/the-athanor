@@ -10,7 +10,7 @@ import {
   type HostResponse,
 } from "./host.ts";
 
-export const RECALL_POLICY_MODES = ["auto", "conversation", "work", "quiet"] as const;
+export const RECALL_POLICY_MODES = ["auto", "conversation", "work", "mixed", "quiet"] as const;
 export type RequestedRecallMode = typeof RECALL_POLICY_MODES[number];
 export type ResolvedRecallMode = "conversation" | "work" | "mixed" | "quiet";
 // The Jev judge only ever proposes a retrieval shape; quiet is the operator's

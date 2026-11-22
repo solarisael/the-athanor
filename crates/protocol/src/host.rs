@@ -111,6 +111,7 @@ pub enum RecallRequestedMode {
     Auto,
     Conversation,
     Work,
+    Mixed,
     Quiet,
 }
 
@@ -120,6 +121,7 @@ impl RecallRequestedMode {
             Self::Auto => "auto",
             Self::Conversation => "conversation",
             Self::Work => "work",
+            Self::Mixed => "mixed",
             Self::Quiet => "quiet",
         }
     }
@@ -2142,6 +2144,82 @@ mod receipt_tests {
         assert_eq!(current["resolvedMode"], "conversation");
         assert!(current.get("should_recall").is_none());
     }
+
+    #[test]
+    fn every_requested_mode_keeps_its_wire_name_through_the_set_command() {
+        for (mode, wire) in [
+            (RecallRequestedMode::Auto, "auto"),
+            (RecallRequestedMode::Conversation, "conversation"),
+            (RecallRequestedMode::Work, "work"),
+            (RecallRequestedMode::Mixed, "mixed"),
+            (RecallRequestedMode::Quiet, "quiet"),
+        ] {
+            assert_eq!(serde_json::to_value(mode).unwrap(), wire);
+            assert_eq!(mode.as_str(), wire);
+
+            let command = json!({
+                "schema_version": 1,
+                "message_id": format!("set-{wire}"),
+                "house_id": "",
+                "sender_room": "",
+                "sender_spirit": "",
+                "sender_session": "",
+                "recipient": "",
+                "command_or_event_type": RECALL_POLICY_SET_REQUESTED_MODE,
+                "correlation_id": format!("set-{wire}"),
+                "causation_id": "",
+                "reply_target": "",
+                "idempotency_key": format!("set-{wire}"),
+                "source_record_refs": [],
+                "scope": "",
+                "visibility": "",
+                "authority_class": "",
+                "created_at": "2026-11-21T18:00:00Z",
+                "expires_at": "2026-11-21T18:01:00Z",
+                "max_hops": 1,
+                "projection_id": RECALL_POLICY_PROJECTION_ID,
+                "base_version": 1,
+                "mutations": [{
+                    "mutation_type": RECALL_POLICY_FIELD_UPDATE,
+                    "field": "requested_mode",
+                    "value": wire
+                }]
+            });
+            let parsed = parse_client_command(command);
+
+            assert!(
+                matches!(
+                    parsed,
+                    Ok(ClientCommand::SetRequestedMode { requested_mode, .. }) if requested_mode == mode
+                ),
+                "{wire} must parse as its requested mode"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stored_policy_state_reads_each_requested_mode() {
+        for wire in ["auto", "conversation", "work", "mixed", "quiet"] {
+            let stored = json!({
+                "requestedMode": wire,
+                "resolvedMode": "conversation",
+                "activeProject": null,
+                "resolutionReason": "default",
+                "lastRefreshReason": null,
+                "lastRefreshAt": null,
+                "workingSetEntries": 0,
+                "recoveryPending": false,
+                "recoveryTerms": [],
+                "degraded": null,
+                "updatedAt": null
+            });
+            let state: RecallPolicyState = serde_json::from_value(stored).unwrap();
+
+            assert_eq!(state.requested_mode.as_str(), wire);
+            assert_eq!(serde_json::to_value(state).unwrap()["requestedMode"], wire);
+        }
+    }
+
     #[test]
     fn paper_boat_subscription_uses_its_own_projection() {
         let command = json!({

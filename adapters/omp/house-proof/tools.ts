@@ -12,7 +12,7 @@ import {
   roomCapability,
   statePathForRoom,
 } from "./room.ts";
-import { RecallPolicyHostClient } from "./recall-policy.ts";
+import { RECALL_POLICY_MODES, RecallPolicyHostClient } from "./recall-policy.ts";
 import { hostHouseId, hostSessionIdentity, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { PAPER_BOAT_GUIDANCE } from "./paper-boat.ts";
@@ -1400,9 +1400,9 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "recall_policy",
     label: "Athanor Recall Policy",
-    description: "Read or set the room's proactive Recall mode. Auto resolves visibly; Conversation, Work, and Quiet are explicit overrides.",
+    description: "Read or set the room's proactive Recall mode. Auto resolves visibly; Conversation, Work, Mixed, and Quiet are explicit overrides.",
     parameters: z.object({
-      requestedMode: z.enum(["auto", "conversation", "work", "quiet"]).optional()
+      requestedMode: z.enum(RECALL_POLICY_MODES).optional()
         .describe("Requested Recall mode. Omit to inspect the current persisted policy."),
     }),
     approval: "write",

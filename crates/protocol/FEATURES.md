@@ -62,7 +62,7 @@ The Host command socket. One file holds the projection constants, the recall pol
 
 Not re-verified at a6ab453; `crates/protocol` (`host.rs:92-375`) would decide:
 
-- The recall policy holds four requested modes: auto, conversation, work, and quiet.
+- The recall policy holds five requested modes: auto, conversation, work, mixed, and quiet.
 - The action says whether it clears the working set and whether it refreshes.
 - The policy state reads a legacy shape and writes the current shape.
 - A delta lists only the changed fields. Eleven policy fields can change, and each change becomes one field update mutation.

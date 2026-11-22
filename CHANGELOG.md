@@ -54,6 +54,7 @@ the exact implementation record.
   would break a room page is refused, and the refusal names the room.
 - `substrate/deploy-local.sh` updates a provisioned Linux House.
   It keeps a database backup and the previous release. It checks health after the update.
+- The command `/paladin` sets the Recall mode to mixed. The `recall_policy` tool also accepts `mixed` as a requested mode.
 
 ### Fixed
 - The automatic context budget is 12 s on every platform. Before this change,

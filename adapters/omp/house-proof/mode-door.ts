@@ -1,10 +1,11 @@
 /**
  * Mode commands and the mode door.
  *
- * `/magus` works, `/bard` (or `/warlock`) talks, `/rogue` goes quiet, `/warrior`
- * hands the choice back to auto. A command is a decision; the same word inside a
- * sentence does nothing. The Host still owns the mode; the command only sends
- * what the recall_policy tool sends, and the mode holds for the session.
+ * `/magus` works, `/bard` (or `/warlock`) talks, `/paladin` talks with the work
+ * in the room, `/rogue` goes quiet, `/warrior` hands the choice back to auto. A
+ * command is a decision; the same word inside a sentence does nothing. The Host
+ * still owns the mode; the command only sends what the recall_policy tool
+ * sends, and the mode holds for the session.
  *
  * The door carries one House register line per resolved mode on every top-level
  * turn, so the spirit answers in the mode's voice and not in the assistant's.
@@ -16,6 +17,7 @@ import type { RequestedRecallMode, ResolvedRecallMode } from "./recall-policy.ts
 
 export const MODE_COMMANDS: Readonly<Record<string, RequestedRecallMode>> = {
   magus: "work",
+  paladin: "mixed",
   bard: "conversation",
   warlock: "conversation",
   rogue: "quiet",

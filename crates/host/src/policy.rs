@@ -565,6 +565,7 @@ impl ResolvedRequestedMode for RecallRequestedMode {
         match self {
             Self::Auto | Self::Conversation => RecallResolvedMode::Conversation,
             Self::Work => RecallResolvedMode::Work,
+            Self::Mixed => RecallResolvedMode::Mixed,
             Self::Quiet => RecallResolvedMode::Quiet,
         }
     }
@@ -572,7 +573,7 @@ impl ResolvedRequestedMode for RecallRequestedMode {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecallPolicySession, resolve_auto_mode};
+    use super::{RecallPolicySession, apply_requested_mode, resolve_auto_mode};
     use protocol::{
         RecallPolicyFacts, RecallPolicyState, RecallQueryRoute, RecallRequestedMode,
         RecallResolvedMode, RecoveryState,
@@ -761,6 +762,27 @@ mod tests {
             session.judged_mode, None,
             "an explicit turn spends the judgment unheard"
         );
+    }
+
+    #[test]
+    fn an_explicit_mixed_mode_resolves_mixed_on_every_path() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        session.judge_mode(RecallResolvedMode::Work);
+        let decision = session.evaluate(RecallRequestedMode::Mixed, facts("general", false));
+
+        assert_eq!(decision.resolved_mode, RecallResolvedMode::Mixed);
+        assert_eq!(session.resolution_reason, "explicit-override");
+
+        let applied =
+            apply_requested_mode(&projection(), RecallRequestedMode::Mixed, "now".to_owned());
+
+        assert_eq!(applied.resolved_mode, RecallResolvedMode::Mixed);
+        assert_eq!(applied.resolution_reason, "explicit-override");
+
+        let fresh = RecallPolicySession::fresh(&applied);
+
+        assert_eq!(fresh.resolved_mode, RecallResolvedMode::Mixed);
+        assert_eq!(fresh.resolution_reason, "explicit-override");
     }
 
     #[test]

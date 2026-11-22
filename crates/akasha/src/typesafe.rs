@@ -66,8 +66,8 @@ pub async fn request_provider(
     }
 }
 
-pub async fn jev_giga_policy(room_dir: &Path, room: &str) -> Option<String> {
-    let marker = crate::room_marker::read_room_marker_async(room_dir).await;
+pub async fn jev_giga_policy(room_dir: &Path, house_dir: Option<&Path>, room: &str) -> Option<String> {
+    let marker = crate::room_marker::read_room_marker_async(room_dir, house_dir).await;
     jev_giga_policy_from_marker(&marker, room)
 }
 

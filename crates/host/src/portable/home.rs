@@ -1,9 +1,10 @@
 //! The configured home, read and written only inside its own roots.
 //!
 //! Identity context is the home's hand-owned `AGENTS.md` with its exact
-//! `@reference` lines expanded once, from the home or its sibling `house`.
-//! Personal documents are text files under the home; dot segments (including
-//! `.omp/runtime` secrets) and reparse points are never reachable.
+//! `@reference` lines expanded once, from the home, the House folder, or the
+//! library that the room marker names. Personal documents are text files
+//! under the home; dot segments (including `.omp/runtime` secrets) and
+//! reparse points are never reachable.
 
 use super::Refusal;
 use atomicwrites::{AtomicFile, OverwriteBehavior};
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 const INSTRUCTIONS: &str = "AGENTS.md";
 const HOUSE_ROOT: &str = "house";
+const LIBRARY_ROOT: &str = "library";
 const MAX_CONTEXT_BYTES: usize = 512 * 1024;
 pub(super) const MAX_RESOURCE_BYTES: usize = 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 2000;
@@ -39,14 +41,22 @@ fn invalid(message: impl Into<String>) -> Refusal {
     Refusal::new(StatusCode::BAD_REQUEST, "path_invalid", message)
 }
 
-/// Compose the identity context exactly from the home's instruction file.
-pub(super) fn context(home: &Path) -> Result<Context, Refusal> {
+/// Compose the identity context exactly from the home's instruction file. A
+/// reference may name a text document in the home, in the House folder
+/// (`house_dir`, or the `house` folder beside the home), or in the library:
+/// the absolute `"library"` folder of the room marker, which `athanor move`
+/// writes when a room leaves the vault.
+pub(super) fn context(home: &Path, house_dir: Option<&Path>) -> Result<Context, Refusal> {
     let home_root = fs::canonicalize(home)
         .map_err(|error| unavailable(format!("home {} is unreadable: {error}", home.display())))?;
-    let house_root = home
-        .parent()
-        .map(|parent| parent.join(HOUSE_ROOT))
+    let house_root = akasha::room_marker::house_folder(home, house_dir)
         .and_then(|house| fs::canonicalize(house).ok());
+    let library_root = library(&home_root).and_then(|library| fs::canonicalize(library).ok());
+    let roots = [
+        ("home", Some(&home_root)),
+        (LIBRARY_ROOT, library_root.as_ref()),
+        (HOUSE_ROOT, house_root.as_ref()),
+    ];
     let instructions = home_root.join(INSTRUCTIONS);
     let body = fs::read_to_string(&instructions)
         .map_err(|error| unavailable(format!("{INSTRUCTIONS} is unreadable: {error}")))?;
@@ -70,16 +80,12 @@ pub(super) fn context(home: &Path) -> Result<Context, Refusal> {
                 "required reference @{reference} is unreadable: {error}"
             ))
         })?;
-        let label = if let Ok(relative) = target.strip_prefix(&home_root) {
-            format!("home/{}", slash(relative))
-        } else if let Some(relative) = house_root
-            .as_ref()
-            .and_then(|house| target.strip_prefix(house).ok())
-        {
-            format!("{HOUSE_ROOT}/{}", slash(relative))
-        } else {
+        let Some(label) = roots.iter().find_map(|(name, root)| {
+            let relative = target.strip_prefix((*root)?).ok()?;
+            Some(format!("{name}/{}", slash(relative)))
+        }) else {
             return Err(unavailable(format!(
-                "reference @{reference} leaves the home and house roots"
+                "reference @{reference} leaves the home, library, and house roots"
             )));
         };
         // Inside a root, the same resource law applies: no dot segment (so no
@@ -131,12 +137,26 @@ pub(super) fn context(home: &Path) -> Result<Context, Refusal> {
     })
 }
 
-/// A required reference is a line that leads with an `@` mention, optionally
-/// as a list item: `@a.md`, `- @a.md — why`, `1. @"b c.md" ...`. The mention
-/// grammar and punctuation trimming follow OMP's own file-mention parser
-/// (`utils/file-mentions.ts`): `@"…"`, `@'…'`, or `@token` up to whitespace.
-/// Mid-sentence mentions stay prose.
+/// The library folder that the room marker names: an absolute path, or none.
+fn library(home_root: &Path) -> Option<PathBuf> {
+    let bytes = fs::read(home_root.join(akasha::room_marker::ROOM_MARKER_FILENAME)).ok()?;
+    let marker: Value = serde_json::from_slice(&bytes).ok()?;
+    let library = PathBuf::from(marker.get(LIBRARY_ROOT)?.as_str()?);
+
+    library.is_absolute().then_some(library)
+}
+
 fn line_reference(line: &str) -> Option<String> {
+    reference_span(line).map(|span| line[span].to_owned())
+}
+
+/// The byte range of the required reference in `line`. A required reference
+/// is a line that leads with an `@` mention, optionally as a list item:
+/// `@a.md`, `- @a.md — why`, `1. @"b c.md" ...`. The mention grammar and
+/// punctuation trimming follow OMP's own file-mention parser
+/// (`utils/file-mentions.ts`): `@"…"`, `@'…'`, or `@token` up to whitespace.
+/// Mid-sentence mentions stay prose. `athanor move` rewrites this range.
+pub fn reference_span(line: &str) -> Option<std::ops::Range<usize>> {
     let mut rest = line.trim_start();
     for marker in ["- ", "* ", "+ "] {
         if let Some(after) = rest.strip_prefix(marker) {
@@ -169,7 +189,12 @@ fn line_reference(line: &str) -> Option<String> {
             ')', ']', '}', '>', '.', ',', ';', ':', '!', '?', '"', '\'', '`',
         ])
         .trim();
-    (!cleaned.is_empty()).then(|| cleaned.to_owned())
+    if cleaned.is_empty() {
+        return None;
+    }
+    // `cleaned` is a slice of `line`, so its offset is its place in the line.
+    let start = cleaned.as_ptr() as usize - line.as_ptr() as usize;
+    Some(start..start + cleaned.len())
 }
 
 fn slash(path: &Path) -> String {
@@ -435,7 +460,7 @@ mod tests {
             "# Kintsu\n@active_spirit.md\n@../house/ORGANS.md\ntail\n",
         )
         .unwrap();
-        let context = context(&home).unwrap();
+        let context = context(&home, None).unwrap();
         assert!(
             context
                 .text
@@ -465,7 +490,7 @@ mod tests {
             "# Kintsu\n\n- @active_spirit.md — who I am right now\n- @agreement.md — the hand agreement\n* @\"with space.md\" (quoted)\n1. @../house/ORGANS.md — the shared organs\nMention @nowhere.md mid-sentence stays prose.\n",
         )
         .unwrap();
-        let context = context(&home).unwrap();
+        let context = context(&home, None).unwrap();
         for marker in [
             "HOME_MARKER",
             "AGREEMENT_MARKER",
@@ -490,7 +515,7 @@ mod tests {
         assert_eq!(context.sources.len(), 5);
         fs::write(home.join(INSTRUCTIONS), "- @missing.md — required\n").unwrap();
         assert_eq!(
-            super::context(&home).err().unwrap().code,
+            super::context(&home, None).err().unwrap().code,
             "home_unavailable"
         );
         fs::remove_dir_all(root).unwrap();
@@ -501,10 +526,49 @@ mod tests {
         let root = fixture();
         let home = root.join("kintsu");
         fs::write(home.join(INSTRUCTIONS), "@missing.md\n").unwrap();
-        assert_eq!(context(&home).err().unwrap().code, "home_unavailable");
+        assert_eq!(context(&home, None).err().unwrap().code, "home_unavailable");
         fs::write(root.join("secret.md"), "outside").unwrap();
         fs::write(home.join(INSTRUCTIONS), "@../secret.md\n").unwrap();
-        assert_eq!(context(&home).err().unwrap().code, "home_unavailable");
+        assert_eq!(context(&home, None).err().unwrap().code, "home_unavailable");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // Kills: a moved home that loses its House or library references, and a
+    // library root that a marker without an absolute `library` still opens.
+    #[test]
+    fn a_moved_home_reads_the_named_house_and_its_library() {
+        let root = fixture();
+        let (home, vault) = (root.join("rooms").join("kintsu"), root.join("vault"));
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(vault.join("kintsu")).unwrap();
+        fs::create_dir_all(vault.join("house")).unwrap();
+        fs::write(vault.join("house/ORGANS.md"), "VAULT_ORGANS\n").unwrap();
+        fs::write(vault.join("kintsu/notes.md"), "LIBRARY_NOTES\n").unwrap();
+        fs::write(
+            home.join(".athanor-room.json"),
+            format!("{{\"room\":\"kintsu\",\"library\":{:?}}}", vault.join("kintsu")),
+        )
+        .unwrap();
+        fs::write(
+            home.join(INSTRUCTIONS),
+            format!(
+                "- @{}\n- @{}\n",
+                vault.join("house/ORGANS.md").display(),
+                vault.join("kintsu/notes.md").display()
+            ),
+        )
+        .unwrap();
+
+        let context = context(&home, Some(&vault.join("house"))).unwrap();
+        assert!(context.text.contains("<!-- athanor:source house/ORGANS.md"));
+        assert!(context.text.contains("VAULT_ORGANS\n<!-- athanor:end house/ORGANS.md -->"));
+        assert!(context.text.contains("LIBRARY_NOTES\n<!-- athanor:end library/notes.md -->"));
+        fs::write(home.join(".athanor-room.json"), r#"{"room":"kintsu","library":"vault/kintsu"}"#)
+            .unwrap();
+        assert_eq!(
+            super::context(&home, Some(&vault.join("house"))).err().unwrap().code,
+            "home_unavailable"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

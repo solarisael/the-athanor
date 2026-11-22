@@ -82,6 +82,7 @@ async fn run() -> Result<(), String> {
         bearer_token: house.bearer_token.clone(),
         room_dir: config.room_dir,
         state_dir: config.state_dir,
+        house_dir: None,
         house_id: house.house_id.clone(),
         room: room.clone(),
         spirit: config.spirit,

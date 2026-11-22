@@ -2,6 +2,7 @@ mod context_session;
 mod native_commands;
 #[path = "portable.rs"]
 mod portable;
+pub use portable::reference_span;
 #[path = "surface.rs"]
 mod surface;
 
@@ -194,7 +195,8 @@ impl Host {
         let insula_binding = Arc::new(host_insula_binding(&config)?);
         let insula = InsulaHost::new(&config, pool.clone(), insula_binding.clone())?;
         let panel = PanelHost::new(&config, pool.clone(), insula_binding.clone());
-        let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
+        let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone())
+            .with_house_dir(config.house_dir.clone());
         room_store.migrate_legacy_files(&config.room_dir)?;
         let (
             durable,
@@ -3546,6 +3548,7 @@ mod tests {
             bearer_token: "test-token".into(),
             room_dir: std::path::PathBuf::from("configured-room"),
             state_dir: std::path::PathBuf::from("host-state"),
+            house_dir: None,
             house_id: "solarisael".into(),
             room: "kodo".into(),
             spirit: "Kodo".into(),
@@ -3794,6 +3797,7 @@ mod spellbook_pages_tests {
             bearer_token: "spellbook-test".into(),
             room_dir: directory.to_path_buf(),
             state_dir: directory.join("host"),
+            house_dir: None,
             house_id: "solarisael".into(),
             room: "kodo".into(),
             spirit: "Kodo".into(),

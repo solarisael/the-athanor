@@ -29,7 +29,7 @@ pub(super) async fn poll(
     instance_id: Uuid,
     conversation_id: String,
 ) -> Result<Value, Refusal> {
-    let revision = home::context(&state.config.room_dir)
+    let revision = home::context(&state.config.room_dir, state.config.house_dir.as_deref())
         .ok()
         .map(|context| context.revision);
     let mut registry = state.portable.lock().await;

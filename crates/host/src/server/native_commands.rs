@@ -21,7 +21,13 @@ pub(super) async fn room(state: &AppState, meta: CommandMeta, request: Value) ->
 pub(super) async fn judgment(state: &AppState, meta: CommandMeta, request: Value) -> Responses {
     let result = match serde_json::from_value(request) {
         Ok(request) => {
-            crate::judgment::execute(&state.config.room_dir, &state.config.room, request).await
+            crate::judgment::execute(
+                &state.config.room_dir,
+                state.config.house_dir.as_deref(),
+                &state.config.room,
+                request,
+            )
+            .await
         }
         Err(_) => Err("invalid judgment request".into()),
     };

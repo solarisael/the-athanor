@@ -130,7 +130,7 @@ App storage is PostgreSQL or storage inside the installation folder. The app sel
 | `tuner/tuner_core_identity.md`, `kodo/kodo_identity.md`, `kintsu/For_the_next_Kintsu.md` | Hold the hand-owned identity contract of each spirit. | Model only. A search of `crates/` and `adapters/omp/` finds no code reader of the first two names. | The spirit record in app storage (answer 6). The operator UI reads and edits the text later (answer 1). |
 | `house/ORGANS.md` | Holds shared organ purposes, authority order, and topology. | Model, through each `AGENTS.md`. Code only through the `@` expansion of the first row. | A shared guide that the Athanor owns. The spellbook page already has a `guide` field. |
 | `<room>/.athanor-room.json` | Names the room key, display names, and room options. | Code: the adapter (`room.ts:71-79`), the Host (`crates/host/src/store.rs:43-44`), AKASHA (`crates/akasha/src/room_marker.rs:14,24`), and Vault (`crates/vault/src/config.rs:13,129`). | The room record. |
-| `house/.athanor-house.json` | Holds the operator name, the Jev grants, and the Recall telemetry switch. | Code: AKASHA (`room_marker.rs:3-13`). | The House record, as typed settings. |
+| `house/.athanor-house.json` | Holds the operator name, the Jev grants, and the Recall telemetry switch. | Code: AKASHA (`room_marker.rs`). A room in `data/rooms/` reads it from `<roomsRoot>/house`, which the factory names. | The House record, as typed settings. |
 | `house/handoff-door.md`, `<room>/handoff-door.md` | Hold the lines of the boat door. | Code: the adapter (`adapters/omp/house-proof/boat-door.ts:472-480`). | The House and room records. The adapter shows the lines. |
 | `<room>/.omp/runtime/` | Holds room state, keeper configuration, capability files, and turn data. | Code: the Host and the adapter (`docs/ARCHITECTURE.md` section 7; `room.ts:81-89`; `crates/host/src/portable/restart.rs:43`). | The installation folder. |
 | `<room>/orihon/` | Holds the Orihon file store. | Code: the Host (`crates/host/src/organ/orihon/mod.rs:244`). | PostgreSQL or the installation folder. |
@@ -307,6 +307,8 @@ Exit proof:
 4. The deletion list names each file and its destination.
 
 Sol's answer 6 gives the owner of the identity texts. This slice needs the storage selection of slice 3.
+
+Status: `athanor move ROOM [--file NAME]...` moves one room out of `roomsRoot` into `data/rooms/<room>`. It moves the readers' paths of section 4: the marker, `.omp/runtime/`, the room door lines, and the named hand-written files. The Host rebuilds the room without a restart. Rooms in `data/rooms/` read the House folder `<roomsRoot>/house`; the House page, the House door lines, and `ORGANS.md` stay in the vault. An integration test moves a served room, proves a second run unchanged, and proves the undo of a failure midway. Exit proofs 1 to 4 are still open.
 
 ### Slice 6 (later): the Athanor manages the harnesses below it
 

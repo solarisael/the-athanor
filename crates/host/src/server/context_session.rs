@@ -513,8 +513,13 @@ async fn judge(state: &AppState, request: JudgmentRequest) -> Result<Value, Stri
         } => Some("lessons"),
         _ => None,
     };
-    let mut result =
-        crate::judgment::execute(&state.config.room_dir, &state.config.room, request).await;
+    let mut result = crate::judgment::execute(
+        &state.config.room_dir,
+        state.config.house_dir.as_deref(),
+        &state.config.room,
+        request,
+    )
+    .await;
     if let Some(grant) = grant {
         if let Ok(result) = &mut result {
             result["receipt"] = observations::receipt(&result["receipt"]);

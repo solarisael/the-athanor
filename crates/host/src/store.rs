@@ -27,11 +27,27 @@ pub struct RoomIdentity {
 pub struct RoomStateStore {
     path: PathBuf,
     room: String,
+    /// The House folder whose page fills a missing operator; `None` takes
+    /// the one beside the room folder.
+    house_dir: Option<PathBuf>,
 }
 
 impl RoomStateStore {
     pub fn new(path: PathBuf, room: String) -> Self {
-        Self { path, room }
+        Self {
+            path,
+            room,
+            house_dir: None,
+        }
+    }
+
+    pub fn with_house_dir(mut self, house_dir: Option<PathBuf>) -> Self {
+        self.house_dir = house_dir;
+        self
+    }
+
+    pub(crate) fn house_dir(&self) -> Option<&Path> {
+        self.house_dir.as_deref()
     }
 
     pub fn load(&self) -> Result<RecallPolicyState, String> {

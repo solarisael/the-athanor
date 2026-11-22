@@ -18,6 +18,7 @@ fn room_config(house: &HouseConfig, root: &Path, record: &SpiritRecord) -> HostC
         bearer_token: house.bearer_token.clone(),
         room_dir: root.join(&record.room),
         state_dir: root.join(&record.room).join("host"),
+        house_dir: None,
         house_id: house.house_id.clone(),
         room: record.room.clone(),
         spirit: record.spirit.clone(),

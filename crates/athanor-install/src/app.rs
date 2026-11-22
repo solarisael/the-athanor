@@ -31,8 +31,10 @@ pub(crate) fn installed_runtime(layout: &InstallLayout) -> Result<(RuntimeConfig
 }
 
 /// Where the rooms of this install live. A room in the installation folder
-/// `<dataRoot>/rooms/<room>` keeps its Host state in its `host/` folder. A
-/// legacy room keeps `<roomsRoot>/<room>` and `<dataRoot>/state/host/<room>`.
+/// `<dataRoot>/rooms/<room>` keeps its Host state in its `host/` folder and
+/// reads the House folder `<roomsRoot>/house`. A legacy room keeps
+/// `<roomsRoot>/<room>` and `<dataRoot>/state/host/<room>`, and reads the
+/// `house` folder beside it, which is the same folder.
 struct RoomPlaces {
     installed: PathBuf,
     legacy: PathBuf,
@@ -44,11 +46,11 @@ struct RoomPlaces {
 impl RoomPlaces {
     fn config(&self, room: &str, spirit: &str, operator: Option<String>) -> host::HostConfig {
         let installed = self.installed.join(room);
-        let (room_dir, state_dir) = if installed.is_dir() {
+        let (room_dir, state_dir, house_dir) = if installed.is_dir() {
             let state_dir = installed.join(crate::cli::spirits::HOST_STATE);
-            (installed, state_dir)
+            (installed, state_dir, Some(self.legacy.join("house")))
         } else {
-            (self.legacy.join(room), self.host_state.join(room))
+            (self.legacy.join(room), self.host_state.join(room), None)
         };
 
         host::HostConfig {
@@ -56,6 +58,7 @@ impl RoomPlaces {
             bearer_token: self.house.bearer_token.clone(),
             room_dir,
             state_dir,
+            house_dir,
             house_id: self.house.house_id.clone(),
             room: room.to_owned(),
             spirit: spirit.to_owned(),

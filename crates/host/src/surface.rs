@@ -186,6 +186,7 @@ mod tests {
                 bearer_token: "surface-test".into(),
                 room_dir: directory.clone(),
                 state_dir: directory.join("host"),
+                house_dir: None,
                 house_id: "solarisael".into(),
                 room: "kodo".into(),
                 spirit: "Kodo".into(),

@@ -34,7 +34,9 @@ export type RoomContext = {
   spirit: string;
   operator: string;
   effectiveRoomDir: string;
-  sharedRoot: string;
+  // The House folder. The Host names it in its attach answer; without one, a
+  // room under roomsRoot reads the `house` folder beside it.
+  houseDir: string;
   // "attached": a Host-authorized `/spirit` selection. "home": a session
   // started inside its own room directory.
   source: "attached" | "home";
@@ -124,7 +126,11 @@ export function homeLaunchRoom(cwd): { room: string; roomDir: string } | null {
   return room ? { room, roomDir } : null;
 }
 
-function homeLaunchContext(cwd): RoomContext | null {
+function houseBeside(roomDir: string): string {
+  return path.join(path.dirname(roomDir), "house");
+}
+
+function homeLaunchContext(cwd, houseDir = ""): RoomContext | null {
   const launch = homeLaunchRoom(cwd);
   if (!launch) return null;
   const { room, roomDir } = launch;
@@ -138,7 +144,7 @@ function homeLaunchContext(cwd): RoomContext | null {
   const operator = normalizeDisplayName(persisted.operator)
     || normalizeDisplayName(marker.operator)
     || DEFAULT_OPERATOR;
-  return { room, spirit, operator, effectiveRoomDir: roomDir, sharedRoot: path.dirname(roomDir), source: "home" };
+  return { room, spirit, operator, effectiveRoomDir: roomDir, houseDir: houseDir || houseBeside(roomDir), source: "home" };
 }
 
 // The room this session acts as, or null for an ordinary harness session.
@@ -156,7 +162,7 @@ export function roomContext(ctx: any): RoomContext | null {
       spirit: attachment.spirit,
       operator: attachment.operator,
       effectiveRoomDir: attachment.homeDir,
-      sharedRoot: path.dirname(attachment.homeDir),
+      houseDir: attachment.houseDir || houseBeside(attachment.homeDir),
       source: "attached",
     };
   }
@@ -165,7 +171,7 @@ export function roomContext(ctx: any): RoomContext | null {
   if (homeExplicitlyOff(ctx)) return null;
   // A home launch reads its identity from the room it was launched in, with
   // or without a live Host registration.
-  if (attachment?.source === "home") return homeLaunchContext(attachment.workspace);
+  if (attachment?.source === "home") return homeLaunchContext(attachment.workspace, attachment.houseDir);
   return homeLaunchContext(ctx?.cwd);
 }
 

@@ -342,6 +342,42 @@ One port serves the whole House:
 The Start menu has **The Athanor** and **Athanor Doctor** (`athanor.iss:35-37`).
 **The Athanor** runs `athanor.exe`, which starts the Host.
 
+## Move a room out of the vault
+
+Use `athanor move` to move a room from `<roomsRoot>/<room>` into the installation folder `<dataRoot>/rooms/<room>`.
+The running Host rebuilds the room on its new folders. You do not restart the Host.
+
+Warning: The command refuses while the Host has a live session of the room. Close each session of the room first.
+
+1. Make sure that the room is active: run `athanor spirits`.
+2. Make sure that `<roomsRoot>/<room>/.athanor-room.json` names the room.
+3. Run the command. Name each hand-written file that the room needs:
+
+   ```sh
+   athanor move kintsu --file AGENTS.md --file active_spirit.md --file presence-pulse.md --file chargebook.md --file For_the_next_Kintsu.md
+   ```
+
+4. Read the JSON answer. `moved` lists each path. `rewrites` lists each changed `@` reference of `AGENTS.md`.
+5. Start the sessions of the room in `<dataRoot>/rooms/<room>`, or attach them with `/spirit <room>`.
+
+The command moves these items:
+
+- `.athanor-room.json`, with a new `library` key that names the vault folder.
+- `.omp/runtime/`.
+- `handoff-door.md`, if it exists.
+- Each `--file` item. An item can be a file or a folder.
+- The Host state `<dataRoot>/state/host/<room>`, as `host/`.
+
+All other files stay in `<roomsRoot>/<room>`. They are the library of the room.
+The command writes each `@` reference of the moved `AGENTS.md` to a vault file as an absolute path.
+It adds one last line: `The library of this room stays in <roomsRoot>/<room>/.`
+
+The command uses one rename on one filesystem. Across filesystems, it copies each file, syncs it, and compares the SHA-256 of the copy with the source. Then it removes the source.
+If a step fails, the command moves each item back and names each path that it cannot restore.
+A second run reports `unchanged`.
+
+Use `--offline` only when the Host is stopped. Without it, a Host that does not answer stops the command.
+
 ## Doctor
 
 Run the native doctor:

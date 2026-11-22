@@ -71,6 +71,7 @@ pub async fn navigate(
     } else {
         judgment::choose_orihon(
             &host.room_dir,
+            host.house_dir.as_deref(),
             &host.room,
             &request.query,
             &options,
@@ -186,6 +187,7 @@ async fn select_page(
             .collect();
         let receipt = judgment::choose_orihon(
             &host.room_dir,
+            host.house_dir.as_deref(),
             &host.room,
             &request.query,
             &options,

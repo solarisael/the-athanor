@@ -30,6 +30,8 @@ pub struct GigaClassifierConfig {
     credential: Arc<str>,
     policy_revision: String,
     room_dir: PathBuf,
+    /// The House folder; `None` takes the one beside `room_dir`.
+    house_dir: Option<PathBuf>,
     room: String,
     /// The trusted Host operator. `None` is the local House: Recall reads
     /// exactly as the Host's own Recall does without an operator.
@@ -56,6 +58,7 @@ impl GigaClassifierConfig {
             credential: Arc::from(credential),
             policy_revision,
             room_dir,
+            house_dir: None,
             room,
             operator: None,
         })
@@ -65,6 +68,12 @@ impl GigaClassifierConfig {
     /// from a display name or transcript text.
     pub fn with_operator(mut self, operator: Option<OperatorKey>) -> Self {
         self.operator = operator;
+        self
+    }
+
+    /// Bind the House folder named by trusted Host configuration.
+    pub fn with_house_dir(mut self, house_dir: Option<PathBuf>) -> Self {
+        self.house_dir = house_dir;
         self
     }
 
@@ -95,7 +104,7 @@ impl GigaClassifierConfig {
         let room_dir = room_dir_from_ledger(ledger_dir).ok_or_else(|| {
             AppError::Config("standalone GIGA classifier source ledger path is invalid".into())
         })?;
-        let marker = crate::room_marker::read_room_marker(&room_dir);
+        let marker = crate::room_marker::read_room_marker(&room_dir, None);
         if marker.is_null() {
             return Err(AppError::Config(
                 "standalone GIGA classifier requires a room grant".into(),
@@ -127,7 +136,7 @@ impl GigaClassifierConfig {
 
     /// The effective room marker that holds this room's grants.
     pub(super) async fn marker(&self) -> Value {
-        read_room_marker_async(&self.room_dir).await
+        read_room_marker_async(&self.room_dir, self.house_dir.as_deref()).await
     }
 
     pub(super) async fn grant_is_current(&self) -> bool {

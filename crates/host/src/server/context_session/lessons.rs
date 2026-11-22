@@ -184,7 +184,12 @@ pub(super) async fn select(
 async fn requires_credential(state: &AppState, request: &LessonPlanRequest) -> bool {
     if request.capabilities.automatic_recall
         && request.capabilities.top_level
-        && crate::judgment::orihon_policy(&state.config.room_dir, &state.config.room).await["approved"]
+        && crate::judgment::orihon_policy(
+            &state.config.room_dir,
+            state.config.house_dir.as_deref(),
+            &state.config.room,
+        )
+        .await["approved"]
             == true
     {
         return true;

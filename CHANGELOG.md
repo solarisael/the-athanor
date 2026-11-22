@@ -49,6 +49,7 @@ the exact implementation record.
   uses its configured room.
 
 ### Added
+- `substrate/test-ignored-db.sh` runs the database tests that have `#[ignore]` on a throwaway PostgreSQL server. CI does not run these tests. On 2026-11-21 the script ran 161 tests and all passed.
 - `spellbook_write` (Host command `athanor.spellbook.write`) replaces this
   room's page or the House page whole after validation. A House page that
   would break a room page is refused, and the refusal names the room.

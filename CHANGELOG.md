@@ -26,6 +26,7 @@ the exact implementation record.
 - In conversation mode, a message that names a canon entity now gets a Recall search when the plan judge selects Skip. Other Skip plans stay a skip.
 - The Host and the GIGA worker no longer refuse a TypeSafe request when its text looks like a secret. The check matched ordinary prose, such as `password:` or a word that ends in `sk-`, and refused 59 of 533 Recall reranks in one room. An empty query, prompt, or excerpt now has its own refusal reason.
 - Each House tool now refuses an argument key that it does not know. The error names the key and lists the accepted keys. Before this change, the tool ignored the key and reported success.
+- `docs/VOCABULARY.md` defines 22 more House words, from `harness` to `quest`. Bellows is now the House word for an adapter.
 - Orihon Fold keeps the current prefix when one background merge makes a small change.
 - A new message can publish a partial merge batch. Background jobs publish only a substantial reduction.
 - Orihon Fold sends only the latest size correction when it retries a compactor request.

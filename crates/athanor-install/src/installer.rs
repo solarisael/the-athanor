@@ -116,6 +116,12 @@ fn nats_server_config(secrets: &RuntimeSecrets) -> Result<String> {
     ] {
         api_publish.push(format!("$JS.API.CONSUMER.CREATE.{stream}.>"));
     }
+    // A room that leaves the spirit record takes its durable hallway consumer
+    // with it. The Host deletes no consumer of another stream.
+    api_publish.push(format!(
+        "$JS.API.CONSUMER.DELETE.{}.>",
+        origami::cranes::broker::HALLWAY_STREAM_NAME
+    ));
     let host_publish = [
         api_publish,
         vec![

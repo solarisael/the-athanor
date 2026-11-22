@@ -146,6 +146,7 @@ dependencies = [
 name = "athanor-install"
 version = "0.1.0"
 dependencies = [
+ "akasha",
  "anyhow",
  "async-nats",
  "chrono",
@@ -161,10 +162,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite 0.28.0",
+ "tracing-subscriber",
  "url",
  "uuid",
  "windows-sys 0.61.2",
@@ -1830,6 +1833,7 @@ dependencies = [
  "sqlx",
  "summoning",
  "tokio",
+ "tokio-tungstenite 0.28.0",
  "tokio-util",
  "tower",
  "tracing",

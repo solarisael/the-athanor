@@ -30,6 +30,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "room_settings",
     "spellbook_pages",
     "spirit_texts",
+    "spirits",
     "insula.log",
     "insula.vitals_minute",
     "insula.retention_receipts",

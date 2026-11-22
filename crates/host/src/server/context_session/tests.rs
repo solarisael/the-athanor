@@ -285,6 +285,28 @@ async fn adoption_retires_old_evidence_preserves_static_bytes_and_ignores_later_
 }
 
 #[tokio::test]
+async fn prepare_passes_the_model_window_to_context_analysis() {
+    let fixture = Fixture::new();
+    fixture.prove_frame().await;
+    let mut request = fixture.request("first").await;
+    request["contextWindowTokens"] = json!(0);
+    // The first prepare rotates the proven frame, which analyzes the request.
+    let refused = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap_err();
+
+    assert!(refused.contains("contextWindowTokens"), "{refused}");
+
+    let mut request = fixture.request("first").await;
+    request["contextWindowTokens"] = json!(1_000_000);
+    request["compactionThresholdTokens"] = json!(850_000);
+
+    prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn adoption_refuses_unknown_blocks_invisible_turns_and_foreign_plan_tokens() {
     let fixture = Fixture::new();
     let mut request = fixture.request("first").await;

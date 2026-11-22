@@ -142,13 +142,15 @@ port=$(jq -er '.hostPort | numbers | select(. >= 1 and . <= 65535 and floor == .
 room=$(jq -er '.defaultRoom | select(test("^[a-z0-9]+(-[a-z0-9]+)*$"))' "$config")
 state=$(jq -er '.operatorStateRoot | select(startswith("/"))' "$config")
 vault=$(jq -er '.roomsRoot | select(startswith("/"))' "$config")
-rooms=$(jq -er '.rooms | select(length > 0) | .[].room | select(test("^[a-z0-9]+(-[a-z0-9]+)*$"))' "$config")
+# The `spirits` table holds the rooms. runtime.json lists rooms only before their first import.
+rooms=$(jq -r '.rooms[]?.room' "$config")
 
 [[ $unit_start == *"path=$live_bin/athanor ;"* && $unit_env == "$env_file (ignore_errors=no)"* &&
     " $unit_vars " == *" ATHANOR_DATA_ROOT=$data "* &&
     " $unit_vars " == *" ATHANOR_PROGRAM_ROOT=$live_bin "* ]] ||
     fail 'the user unit does not use this checkout and database environment'
 for configured_room in $rooms; do
+    [[ $configured_room =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || fail "invalid room key: $configured_room"
     [[ -s $vault/$configured_room/.omp/runtime/athanor-house-state.json ]] ||
         fail "missing room state: $configured_room"
 done

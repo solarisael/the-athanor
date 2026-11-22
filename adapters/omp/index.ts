@@ -71,6 +71,7 @@ import { MODE_COMMANDS, MODE_DOOR_TYPE, modeDoor } from "./house-proof/mode-door
 import {
   CONTEXT_BLOCK_TYPES,
   contextBlockKind,
+  modelContextWindow,
   planContextLessons,
   prepareContext,
   readLegacyContextProposal,
@@ -941,6 +942,7 @@ export default function solarisaelHouseProof(pi, release) {
         }),
         existingBlockKinds,
         contextCharacters: messages.reduce((sum, message) => sum + messageText(message).length, 0),
+        ...modelContextWindow(ctx.model, pi.pi?.settings),
         userTurnOrdinal: messages.filter((message) => message?.role === "user").length,
         freshConversation: conversation?.fresh === true,
         activeProject,

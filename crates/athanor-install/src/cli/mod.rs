@@ -8,6 +8,7 @@ mod deploy;
 pub mod keeper;
 pub mod launch;
 pub mod manage;
+pub mod spirits;
 pub mod start;
 pub mod status;
 
@@ -24,6 +25,10 @@ start [--service]      Start what is missing. --service starts the Windows servi
 keeper ROOM            Run the OMP keeper for one room, by its harness registry name.\n  \
 keeper --config FILE   Run the OMP keeper for the room whose config is FILE.\n  \
 chat [--room ROOM]     Talk to a room from this terminal.\n  \
+summon ROOM SPIRIT --operator NAME\n                         Add a room to the spirit record. The running Host opens it.\n  \
+retire ROOM            Retire a room. The running Host closes it.\n  \
+rename OLD NEW [--spirit NAME]\n                         Move a room that never woke to a new room key.\n  \
+spirits                List the active rooms of the spirit record as JSON.\n  \
 launch-session --manifest FILE\n                         Internal: run a Host-prepared one-use terminal relaunch.\n  \
 doctor                 Check the installation.\n  \
 deploy                 Prepare or install a local release. Run athanor deploy help.\n  \
@@ -54,6 +59,7 @@ pub fn run(arguments: Vec<String>) -> Result<ExitCode> {
         "deploy" => deploy::run(&rest),
         "keeper" => keeper::run(&rest),
         "chat" => chat::run(&rest).map(|()| ExitCode::SUCCESS),
+        "summon" | "retire" | "rename" | "spirits" => spirits::run(mode, &rest),
         protocol::launch::LAUNCH_SESSION_MODE => launch::run(&rest),
         "install"
         | "update"

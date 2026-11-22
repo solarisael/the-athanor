@@ -788,10 +788,6 @@ function executeSwitcherCommand(id) {
   command.execute(trigger);
 }
 
-// the House roster the pickers draw from; membership vocabularies differ by surface
-const HOUSE_ROOMS = ["Kintsu room", "Kodo room", "Tuner room"];
-
-
 function renderCardPicker(verb, attr, options) {
   if (options.length === 0) return "";
   const picker = state.accessPicker

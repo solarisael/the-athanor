@@ -21,6 +21,7 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
+- Schema 51 adds table `spirits`: one record for each room, with the spirit name and the operator. The Host now opens, rebuilds, and closes rooms while it runs when the table changes, and `GET /room/<room>/spirits` lists the open rooms. New commands: `athanor summon ROOM SPIRIT --operator NAME`, `athanor retire ROOM`, `athanor rename OLD NEW [--spirit NAME]`, and `athanor spirits`. A summoned room lives in `data/rooms/<room>`; `runtime.json` `rooms` may be empty and only fills an empty table once. Each `<room>-kitten` is now a familiar with the shared lessons.
 - The Recall plan receipt in `recall-turns.jsonl` now records how sure Jev was. It shows the index and the action of the selected plan, the confidence of Jev, and the probability of each candidate plan. It contains no query text. Each record also has the action of the plan that the Host used, with or without a judgment from Jev.
 - Each Recall card that Jev scores now has a label: the title of the memory and the heading of the section. Before this change, Jev got the excerpt only.
 - Jev now scores each of the 64 candidates of the Recall pool. The Recall packet has its own limit of 65,536 bytes. Before this change, a limit of 32,768 bytes removed 16 to 18 candidates from each packet.
@@ -70,6 +71,17 @@ the exact implementation record.
 - The automatic context budget is 12 s on every platform. Before this change,
   the Host kept 2 s off Windows and the adapter kept 8 s. The Host used the
   earlier deadline, so automatic Recall rarely completed on Linux.
+- A retired room no longer holds the other rooms. The Host closed rooms one at
+  a time and waited for each one, and the broker refused `athanor-host` the
+  delete of a hallway consumer, so each retired room held every later change
+  of the spirit record for at least 10 s and kept its consumer. The Host now
+  closes each room in a task of its own and gives the delete 5 s. The installer
+  and the Nix module grant `athanor-host`
+  `$JS.API.CONSUMER.DELETE.ATHANOR_HALLWAY.>`, so a retired room's consumer
+  leaves the stream.
+- The `athanor` Host writes its log to stderr, which journald keeps under
+  systemd. The default level is `info`; `RUST_LOG` changes it. Before this
+  change, the Host log went nowhere.
 
 ## [0.7.0] - 2026-11-14
 

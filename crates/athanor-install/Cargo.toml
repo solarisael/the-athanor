@@ -15,6 +15,7 @@ name = "athanor"
 path = "src/bin/athanor.rs"
 
 [dependencies]
+akasha = { path = "../akasha" }
 anyhow.workspace = true
 hex.workspace = true
 host = { path = "../host" }
@@ -24,6 +25,7 @@ protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
 omp-keeper = { path = "../omp-keeper" }
 serde.workspace = true
+sqlx.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror = "2"
@@ -33,6 +35,7 @@ chrono.workspace = true
 futures-util.workspace = true
 tokio = { workspace = true }
 tokio-tungstenite = "0.28"
+tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]

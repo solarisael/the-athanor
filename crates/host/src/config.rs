@@ -52,6 +52,70 @@ impl KnockAutonomy {
     }
 }
 
+/// The settings that every room of one Host shares. A Host can start with
+/// zero rooms, so these settings do not come from a room.
+#[derive(Clone, Debug)]
+pub struct HouseConfig {
+    pub bind: SocketAddr,
+    pub bearer_token: String,
+    pub house_id: String,
+    pub database_url: Option<String>,
+    pub nats_url: Option<String>,
+    pub nats_auth: Option<origami::cranes::broker::NatsAuth>,
+}
+
+impl HouseConfig {
+    // [host/config/validation] [security/loopback]
+    pub fn validate(&self) -> Result<(), String> {
+        validate_house(
+            self.bind,
+            &self.bearer_token,
+            &self.house_id,
+            self.nats_url.as_deref(),
+        )
+    }
+
+    /// The first House setting that the room does not share, if any.
+    pub(crate) fn disagreement(&self, room: &HostConfig) -> Option<&'static str> {
+        [
+            ("bind address", self.bind == room.bind),
+            ("bearer token", self.bearer_token == room.bearer_token),
+            ("house identifier", self.house_id == room.house_id),
+            ("DATABASE_URL", self.database_url == room.database_url),
+            ("ATHANOR_NATS_URL", self.nats_url == room.nats_url),
+            ("NATS credentials", self.nats_auth == room.nats_auth),
+        ]
+        .into_iter()
+        .find_map(|(setting, agrees)| (!agrees).then_some(setting))
+    }
+}
+
+fn validate_house(
+    bind: SocketAddr,
+    bearer_token: &str,
+    house_id: &str,
+    nats_url: Option<&str>,
+) -> Result<(), String> {
+    if !bind.ip().is_loopback() {
+        return Err("Host bind address must be loopback".into());
+    }
+    if bearer_token.trim().is_empty() {
+        return Err("Host bearer token must not be blank".into());
+    }
+    if house_id.trim().is_empty() {
+        return Err("Host house_id must not be blank".into());
+    }
+    if let Some(url) = nats_url
+        && (url.len() > 2048
+            || !url.starts_with("nats://")
+            || url.bytes().any(|byte| byte.is_ascii_whitespace()))
+    {
+        return Err("Host ATHANOR_NATS_URL must be one bounded nats:// URL".into());
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct HostConfig {
     pub bind: SocketAddr,
@@ -94,12 +158,12 @@ impl HostConfig {
 
     // [host/config/validation] [security/loopback] [protocol/room/key]
     pub fn validate(&self) -> Result<(), String> {
-        if !self.bind.ip().is_loopback() {
-            return Err("Host bind address must be loopback".into());
-        }
-        if self.bearer_token.trim().is_empty() {
-            return Err("Host bearer token must not be blank".into());
-        }
+        validate_house(
+            self.bind,
+            &self.bearer_token,
+            &self.house_id,
+            self.nats_url.as_deref(),
+        )?;
         if !protocol::is_safe_room_key(&self.room) {
             return Err("Host room must be a safe non-reserved room key".into());
         }
@@ -108,19 +172,7 @@ impl HostConfig {
         {
             return Err("Host operator must be a safe operator key".into());
         }
-        if let Some(url) = &self.nats_url {
-            if url.len() > 2048
-                || !url.starts_with("nats://")
-                || url.bytes().any(|byte| byte.is_ascii_whitespace())
-            {
-                return Err("Host ATHANOR_NATS_URL must be one bounded nats:// URL".into());
-            }
-        }
-        for (name, value) in [
-            ("house_id", &self.house_id),
-            ("spirit", &self.spirit),
-            ("session", &self.session),
-        ] {
+        for (name, value) in [("spirit", &self.spirit), ("session", &self.session)] {
             if value.trim().is_empty() {
                 return Err(format!("Host {name} must not be blank"));
             }

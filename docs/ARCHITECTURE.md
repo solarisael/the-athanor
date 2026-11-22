@@ -55,18 +55,20 @@ The service runs with no logged-in user. The Host, the keepers, OMP, and Pulse a
 
 ### 3.1 One process, many rooms
 
-`house::start(Vec<HostConfig>)` runs one thread, one Tokio runtime, and one listener. Each room becomes its own `server::Host`, nested under `/room/<room>` in one axum router (`crates/host/src/house.rs:86-105,166-202`). Every room must share the bind address, the bearer token, the House id, `DATABASE_URL`, and the NATS URL (`house.rs:205-234`). The spirit and the session may differ per room.
+`house::start(HouseConfig, RoomSource)` runs one thread, one Tokio runtime, and one listener. `HouseConfig` holds the bind address, the bearer token, the House id, `DATABASE_URL`, and the NATS settings. The Host can start with zero rooms. Each room becomes its own `server::Host` with its own cancellation and task tracker. One handler sends `/room/<room>` and each path below it to the router of that room. An unknown room gets a 404 JSON refusal that names the room. `GET /room/<room>/spirits` lists the open rooms (`crates/host/src/house.rs`).
 
-The production builder makes one `HostConfig` per `runtime.json` `rooms[]` entry (`app.rs:30-58`):
+With a database, table `spirits` (migration 0051) is the room list. At start, the Host imports the `runtime.json` `rooms` into an empty table one time. The Host then follows `NOTIFY athanor_spirits`: it opens a new room, closes a retired room, and rebuilds a room whose spirit or operator changed. No restart is necessary. After a lost LISTEN connection, the Host connects again with backoff and reads the full table. A closed room stops in a task of its own, so a room that stops slowly holds no other room and no later change; its room key opens again only after its previous Host stopped. When a room leaves the table, the Host removes its hallway consumer `athanor-hallway-<room>-v1` and gives the broker 5 s to answer; the broker policy lets `athanor-host` delete consumers of `ATHANOR_HALLWAY` only. Use `athanor summon`, `athanor retire`, `athanor rename`, and `athanor spirits` to change and read the table.
+
+The production builder makes one `HostConfig` for each record (`app.rs`):
 
 | Field | Source |
 |---|---|
 | `bind` | `127.0.0.1` plus `runtime.json` `hostPort` |
 | `bearer_token` | `runtime-secrets.json` `hostToken` |
-| `room`, `spirit` | `rooms[].room`, `rooms[].spirit` |
-| `operator` | Optional `rooms[].operator`; independent of the room-state display name. |
-| `room_dir` | `roomsRoot/<room>` |
-| `state_dir` | `data/state/host/<room>` |
+| `room`, `spirit` | the `spirits` record |
+| `operator` | the `spirits` record; optional only in a `runtime.json` room before the import, which refuses a room without one |
+| `room_dir` | `data/rooms/<room>` when that folder exists, else the legacy `roomsRoot/<room>` |
+| `state_dir` | `data/rooms/<room>/host` for a room in `data/rooms`, else `data/state/host/<room>` |
 | `house_id` | `runtime.json` `houseId` |
 | `session` | `app:<room>` |
 | `database_url` | the secrets file, always set |

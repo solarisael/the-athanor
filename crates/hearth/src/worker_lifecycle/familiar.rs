@@ -63,9 +63,10 @@ impl RoleTag {
     }
 }
 
-/// The sixteen named familiars and the role tag each needs beside
-/// [`RoleTag::Shared`]. The two generic room kittens need the shared tag only.
-const ROSTER: [(&str, Option<RoleTag>); 16] = [
+/// The fourteen named familiars and the role tag each needs beside
+/// [`RoleTag::Shared`]. The kitten of each room, `<room>-kitten`, is not in
+/// the roster: it needs the shared tag only (see [`Familiar::named`]).
+const ROSTER: [(&str, Option<RoleTag>); 14] = [
     ("cisma-kitten", Some(RoleTag::Scout)),
     ("faro-dragonling", Some(RoleTag::Scout)),
     ("caliper-kitten", Some(RoleTag::Scout)),
@@ -80,8 +81,6 @@ const ROSTER: [(&str, Option<RoleTag>); 16] = [
     ("plumb-kitten", Some(RoleTag::Verifier)),
     ("forja-kitten", Some(RoleTag::Builder)),
     ("lavra-dragonling", Some(RoleTag::Builder)),
-    ("kintsu-kitten", None),
-    ("kodo-kitten", None),
 ];
 
 const UNAVAILABLE: LifecycleError = refused(
@@ -106,14 +105,25 @@ pub struct Familiar {
 }
 
 impl Familiar {
-    /// The named familiar an agent definition name selects. Letter case and
-    /// surrounding space cannot hide a familiar from its door.
+    /// The familiar an agent definition name selects: a roster name, or
+    /// `<room>-kitten` for any safe room key, so a new room needs no edit
+    /// here. Letter case and surrounding space cannot hide a familiar from
+    /// its door.
     pub fn named(agent_name: &str) -> Option<Self> {
         let agent_name = agent_name.trim();
-        ROSTER
+        if let Some(&(_, role)) = ROSTER
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(agent_name))
-            .map(|&(_, role)| Self { role })
+        {
+            return Some(Self { role });
+        }
+
+        let agent_name = agent_name.to_ascii_lowercase();
+        let room = agent_name.strip_suffix("-kitten")?;
+
+        crate::RoomKey::new(room)
+            .is_ok()
+            .then_some(Self { role: None })
     }
 
     /// The exact tags whose lessons this familiar must receive, shared first.

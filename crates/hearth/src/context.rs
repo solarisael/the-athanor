@@ -403,6 +403,12 @@ pub struct ContextAnalysisRequest {
     pub recognized_entities: Vec<String>,
     #[serde(default)]
     pub context_characters: u64,
+    /// The active model's context window. Without it, the nudge assumes 400,000 tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u64>,
+    /// The token count where the harness starts compaction. It is valid only with a window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_threshold_tokens: Option<u64>,
     pub active_spirit: String,
     pub operator: String,
     #[serde(default)]
@@ -421,6 +427,26 @@ impl ContextAnalysisRequest {
         }
         if self.context_characters > 8_000_000 {
             return Err(ContextError::new("contextCharacters exceeds 8000000"));
+        }
+        if let Some(window) = self.context_window_tokens
+            && !(1..=MAX_CONTEXT_WINDOW_TOKENS).contains(&window)
+        {
+            return Err(ContextError::new(
+                "contextWindowTokens must be from 1 to 10000000",
+            ));
+        }
+        if let Some(threshold) = self.compaction_threshold_tokens {
+            let Some(window) = self.context_window_tokens else {
+                return Err(ContextError::new(
+                    "compactionThresholdTokens requires contextWindowTokens",
+                ));
+            };
+
+            if threshold == 0 || threshold > window {
+                return Err(ContextError::new(
+                    "compactionThresholdTokens must be from 1 to contextWindowTokens",
+                ));
+            }
         }
         if self.recognized_entities.len() > 64
             || self
@@ -803,12 +829,21 @@ fn valid_room(room: &str) -> bool {
         })
 }
 
-fn context_nudge(room: &str, characters: u64, last_band: u64) -> Option<ContextNudge> {
-    let (max_tokens, compaction_at) = match room {
-        "kodo" => (1_000_000_u64, 0.90_f64),
-        _ => (400_000_u64, 0.70_f64),
-    };
-    let tokens = (characters + 2) / 4;
+const MAX_CONTEXT_WINDOW_TOKENS: u64 = 10_000_000;
+const DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 400_000;
+// OMP's default compaction keeps a reserve of 15% of the window (at least 16,384 tokens).
+const DEFAULT_COMPACTION_SHARE: f64 = 0.85;
+
+fn context_nudge(request: &ContextAnalysisRequest, last_band: u64) -> Option<ContextNudge> {
+    let max_tokens = request
+        .context_window_tokens
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS);
+    let compaction_at = request
+        .compaction_threshold_tokens
+        .map_or(DEFAULT_COMPACTION_SHARE, |threshold| {
+            threshold as f64 / max_tokens as f64
+        });
+    let tokens = (request.context_characters + 2) / 4;
     let band = tokens / 40_000;
     if band == 0 || band <= last_band {
         return None;
@@ -817,7 +852,7 @@ fn context_nudge(room: &str, characters: u64, last_band: u64) -> Option<ContextN
     let pct = (fill * 100.0).round() as u64;
     let text = if fill >= compaction_at - 0.20 {
         format!(
-            "Context is ~{pct}% full and compaction is close (this room compacts near {}%). Cast the paper boat soon (sleep), and write anything worth keeping now (remember) before detail blurs.",
+            "Context is ~{pct}% full and compaction is close: it starts near {}%. Cast the paper boat soon (sleep), and write anything worth keeping now (remember) before detail blurs.",
             (compaction_at * 100.0).round() as u64
         )
     } else {
@@ -895,8 +930,115 @@ pub fn analyze_context(
         keyword_reminder: keyword_reminder(&directives),
         keyword_directives: directives,
         process_trigger: process_trigger(&request.prompt),
-        nudge: context_nudge(room, request.context_characters, last_nudge_band),
+        nudge: context_nudge(&request, last_nudge_band),
         room_reminder: room_reminder(room, active_spirit, operator),
         routing_reminder: routing_reminder(request.routing_mode_enabled),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(characters: u64, window: Option<u64>, threshold: Option<u64>) -> ContextAnalysisRequest {
+        ContextAnalysisRequest {
+            prompt: "hello".into(),
+            recognized_entities: Vec::new(),
+            context_characters: characters,
+            context_window_tokens: window,
+            compaction_threshold_tokens: threshold,
+            active_spirit: "Spirit".into(),
+            operator: "operator".into(),
+            routing_mode_enabled: false,
+        }
+    }
+
+    fn nudge(request: ContextAnalysisRequest) -> ContextNudge {
+        analyze_context("any-room", request, 0)
+            .unwrap()
+            .nudge
+            .expect("a first band produces a nudge")
+    }
+
+    #[test]
+    fn the_sent_window_and_threshold_set_the_percentages() {
+        // 200,000 tokens: 20% of a 1,000,000-token window, far from a 900,000-token threshold.
+        let early = nudge(request(800_000, Some(1_000_000), Some(900_000)));
+
+        assert_eq!(early.tokens, 200_000);
+        assert_eq!(early.pct, 20);
+        assert!(!early.text.contains("compaction is close"));
+
+        // The same tokens fill 80% of a 250,000-token window that compacts at 175,000.
+        let late = nudge(request(800_000, Some(250_000), Some(175_000)));
+
+        assert_eq!(late.pct, 80);
+        assert!(late.text.contains("it starts near 70%"), "{}", late.text);
+    }
+
+    #[test]
+    fn a_request_without_a_window_uses_400k_and_the_default_compaction_share() {
+        let early = nudge(request(400_000, None, None));
+
+        assert_eq!(early.pct, 25);
+        assert!(!early.text.contains("compaction is close"));
+
+        let late = nudge(request(1_200_000, None, None));
+
+        assert_eq!(late.pct, 75);
+        assert!(late.text.contains("it starts near 85%"), "{}", late.text);
+    }
+
+    #[test]
+    fn the_room_name_does_not_change_the_nudge() {
+        let first = analyze_context("kodo", request(800_000, None, None), 0).unwrap();
+        let second = analyze_context("other-room", request(800_000, None, None), 0).unwrap();
+
+        assert_eq!(first.nudge, second.nudge);
+    }
+
+    #[test]
+    fn out_of_bounds_windows_and_thresholds_are_refused() {
+        for (window, threshold, message) in [
+            (Some(0), None, "contextWindowTokens must be from 1 to 10000000"),
+            (Some(10_000_001), None, "contextWindowTokens must be from 1 to 10000000"),
+            (None, Some(100), "compactionThresholdTokens requires contextWindowTokens"),
+            (Some(1_000), Some(0), "compactionThresholdTokens must be from 1 to contextWindowTokens"),
+            (Some(1_000), Some(1_001), "compactionThresholdTokens must be from 1 to contextWindowTokens"),
+        ] {
+            let error = analyze_context("any-room", request(0, window, threshold), 0).unwrap_err();
+
+            assert_eq!(error.to_string(), message);
+        }
+
+        assert!(analyze_context("any-room", request(0, Some(10_000_000), Some(10_000_000)), 0).is_ok());
+    }
+
+    #[test]
+    fn the_wire_names_are_camel_case_and_optional() {
+        let sent: ContextAnalysisRequest = serde_json::from_value(serde_json::json!({
+            "prompt": "hello",
+            "contextCharacters": 4,
+            "contextWindowTokens": 200_000,
+            "compactionThresholdTokens": 170_000,
+            "activeSpirit": "Spirit",
+            "operator": "operator",
+        }))
+        .unwrap();
+
+        assert_eq!(sent.context_window_tokens, Some(200_000));
+        assert_eq!(sent.compaction_threshold_tokens, Some(170_000));
+
+        let absent: ContextAnalysisRequest = serde_json::from_value(serde_json::json!({
+            "prompt": "hello",
+            "activeSpirit": "Spirit",
+            "operator": "operator",
+        }))
+        .unwrap();
+        let wire = serde_json::to_value(&absent).unwrap();
+
+        assert_eq!(absent.context_window_tokens, None);
+        assert!(wire.get("contextWindowTokens").is_none());
+        assert!(wire.get("compactionThresholdTokens").is_none());
+    }
 }

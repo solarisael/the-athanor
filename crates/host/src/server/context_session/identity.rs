@@ -162,6 +162,8 @@ async fn rotate(
             prompt: request.prompt.clone(),
             recognized_entities: Vec::new(),
             context_characters: request.context_characters,
+            context_window_tokens: request.context_window_tokens,
+            compaction_threshold_tokens: request.compaction_threshold_tokens,
             active_spirit: authentication.binding.spirit.clone(),
             operator: authentication.binding.operator.clone(),
             routing_mode_enabled: false,

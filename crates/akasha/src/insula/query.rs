@@ -6,7 +6,9 @@ use protocol::restart::RestartState;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use super::event::{ObservationPhase, OutcomeClass, TrustedBinding, atom, is_room, opaque, uuid};
+use super::event::{
+    ObservationPhase, OutcomeClass, TrustedBinding, atom, is_room, is_spirit, opaque, uuid,
+};
 use super::{InsulaError, bad};
 
 pub const INSULA_MAX_VITALS_ROWS: u32 = 5_000;
@@ -157,7 +159,7 @@ pub async fn query_trace(
 ) -> Result<TraceResult, InsulaError> {
     if !atom(&s.house_id, 64)
         || s.room.as_deref().is_some_and(|v| !is_room(v))
-        || s.spirit.as_deref().is_some_and(|v| !opaque(v, 64))
+        || s.spirit.as_deref().is_some_and(|v| !is_spirit(v))
         || s.session_id.as_deref().is_some_and(|v| !opaque(v, 128))
     {
         return Err(bad("scope", "invalid_scope"));

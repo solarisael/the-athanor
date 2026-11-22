@@ -315,9 +315,10 @@ impl RuntimeConfig {
         Ok(())
     }
 
+    // The `spirits` table holds the rooms; `rooms` only fills an empty table once.
     fn validate_rooms(&self) -> Result<()> {
-        if self.rooms.is_empty() {
-            bail!("at least one Host room is required");
+        if !is_safe_room_key(&self.default_room) {
+            bail!("defaultRoom must be a safe room key");
         }
         let mut rooms = std::collections::BTreeSet::new();
         for room in &self.rooms {
@@ -326,7 +327,7 @@ impl RuntimeConfig {
                 bail!("duplicate Host room {:?}", room.room);
             }
         }
-        if !rooms.contains(&self.default_room) {
+        if !rooms.is_empty() && !rooms.contains(&self.default_room) {
             bail!("defaultRoom must name one configured room");
         }
         Ok(())

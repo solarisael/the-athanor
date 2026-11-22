@@ -40,6 +40,14 @@ pub(super) fn opaque(v: &str, n: usize) -> bool {
             b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'/' | b'-' | b'@')
         })
 }
+/// A spirit name is a display name such as `Sköll`. Letters of any script are valid.
+pub(super) fn is_spirit(v: &str) -> bool {
+    !v.is_empty()
+        && v.chars().count() <= 64
+        && v.trim() == v
+        && v.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '_' | '.' | '-' | '\''))
+}
 pub(super) fn uuid(f: &'static str, v: &str) -> Result<(), InsulaError> {
     let u = Uuid::parse_str(v).map_err(|_| bad(f, "malformed_uuid"))?;
     if u.to_string() != v {
@@ -54,7 +62,7 @@ pub fn validate_trusted_binding(v: &TrustedBinding) -> Result<(), InsulaError> {
     if !is_room(&v.room) {
         return Err(bad("room", "invalid_room_key"));
     }
-    if !opaque(&v.spirit, 64) {
+    if !is_spirit(&v.spirit) {
         return Err(bad("spirit", "invalid_identity_atom"));
     }
     if !opaque(&v.session_id, 128) {

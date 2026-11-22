@@ -9,8 +9,8 @@ use anyhow::{Context, Result};
 use protocol::LOOPBACK_HOST;
 use std::{
     env, fs,
-    io::{self, Write},
-    net::SocketAddr,
+    io::{self, IsTerminal, Write},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -30,36 +30,80 @@ pub(crate) fn installed_runtime(layout: &InstallLayout) -> Result<(RuntimeConfig
     Ok((config, secrets))
 }
 
-fn host_configs(
+/// Where the rooms of this install live. A room in the installation folder
+/// `<dataRoot>/rooms/<room>` keeps its Host state in its `host/` folder. A
+/// legacy room keeps `<roomsRoot>/<room>` and `<dataRoot>/state/host/<room>`.
+struct RoomPlaces {
+    installed: PathBuf,
+    legacy: PathBuf,
+    host_state: PathBuf,
+    house: host::HouseConfig,
+    knock_autonomy: host::KnockAutonomy,
+}
+
+impl RoomPlaces {
+    fn config(&self, room: &str, spirit: &str, operator: Option<String>) -> host::HostConfig {
+        let installed = self.installed.join(room);
+        let (room_dir, state_dir) = if installed.is_dir() {
+            let state_dir = installed.join(crate::cli::spirits::HOST_STATE);
+            (installed, state_dir)
+        } else {
+            (self.legacy.join(room), self.host_state.join(room))
+        };
+
+        host::HostConfig {
+            bind: self.house.bind,
+            bearer_token: self.house.bearer_token.clone(),
+            room_dir,
+            state_dir,
+            house_id: self.house.house_id.clone(),
+            room: room.to_owned(),
+            spirit: spirit.to_owned(),
+            session: format!("app:{room}"),
+            database_url: self.house.database_url.clone(),
+            nats_url: self.house.nats_url.clone(),
+            nats_auth: self.house.nats_auth.clone(),
+            knock_autonomy: self.knock_autonomy,
+            operator,
+        }
+    }
+}
+
+/// The House settings, and the spirit record as the source of the rooms. The
+/// `rooms` of runtime.json only fill an empty record once.
+pub(crate) fn host_rooms(
     layout: &InstallLayout,
     config: &RuntimeConfig,
     secrets: &RuntimeSecrets,
-) -> Result<Vec<host::HostConfig>> {
-    let bind: SocketAddr = format!("{LOOPBACK_HOST}:{}", config.host_port).parse()?;
-    let database_url = secrets.database_url();
-    let nats_url = format!("nats://{}:{}", config.nats_host, config.nats_port);
-    let knock_autonomy =
-        host::KnockAutonomy::from_optional(env::var(host::KNOCK_AUTONOMY_ENV).ok().as_deref())
-            .map_err(anyhow::Error::msg)?;
-    Ok(config
+) -> Result<(host::HouseConfig, host::RoomSource)> {
+    let house = host::HouseConfig {
+        bind: format!("{LOOPBACK_HOST}:{}", config.host_port).parse()?,
+        bearer_token: secrets.host_token.clone(),
+        house_id: config.house_id.clone(),
+        database_url: Some(secrets.database_url()),
+        nats_url: Some(format!("nats://{}:{}", config.nats_host, config.nats_port)),
+        nats_auth: secrets.host_nats_auth.clone(),
+    };
+    let places = RoomPlaces {
+        installed: layout.rooms(),
+        legacy: config.rooms_root.clone(),
+        host_state: layout.host_state(),
+        house: house.clone(),
+        knock_autonomy: host::KnockAutonomy::from_optional(
+            env::var(host::KNOCK_AUTONOMY_ENV).ok().as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?,
+    };
+    let seed = config
         .rooms
         .iter()
-        .map(|room| host::HostConfig {
-            bind,
-            bearer_token: secrets.host_token.clone(),
-            room_dir: config.rooms_root.join(&room.room),
-            state_dir: layout.host_state().join(&room.room),
-            house_id: config.house_id.clone(),
-            room: room.room.clone(),
-            spirit: room.spirit.clone(),
-            session: format!("app:{}", room.room),
-            database_url: Some(database_url.clone()),
-            nats_url: Some(nats_url.clone()),
-            nats_auth: secrets.host_nats_auth.clone(),
-            knock_autonomy: knock_autonomy.clone(),
-            operator: room.operator.clone(),
-        })
-        .collect())
+        .map(|room| places.config(&room.room, &room.spirit, room.operator.clone()))
+        .collect();
+    let factory: host::RoomFactory = Arc::new(move |record: &host::SpiritRecord| {
+        places.config(&record.room, &record.spirit, Some(record.operator.clone()))
+    });
+
+    Ok((house, host::RoomSource::Spirits { seed, factory }))
 }
 
 #[cfg(windows)]
@@ -95,6 +139,16 @@ impl Drop for RunOwner {
 }
 
 pub fn run() -> Result<()> {
+    // The Host logs to stderr, which journald keeps for the systemd unit.
+    // RUST_LOG overrides the default level.
+    tracing_subscriber::fmt()
+        .with_writer(io::stderr)
+        .with_ansi(io::stderr().is_terminal())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let layout = InstallLayout::from_environment()?;
     let (config, secrets) = installed_runtime(&layout)?;
     crate::service::ensure_running(&config)?;
@@ -122,8 +176,8 @@ pub fn run() -> Result<()> {
         }
     }
     let control = ControlServer::bind(Arc::clone(&owner))?;
-    let host =
-        host::start(host_configs(&layout, &config, &secrets)?).map_err(anyhow::Error::msg)?;
+    let (house, rooms) = host_rooms(&layout, &config, &secrets)?;
+    let host = host::start(house, rooms).map_err(anyhow::Error::msg)?;
     let mut harnesses_started = Vec::new();
     let mut harnesses_failed = Vec::new();
     for id in owner.registry().auto_start_ids() {

@@ -3244,7 +3244,7 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
         // Retired connection callbacks must never overwrite a newer bridge's health.
         let connection_lost = CancellationToken::new();
         let callback_connection = connection_lost.clone();
-        let client = match origami::cranes::broker::connect_options(state.config.nats_auth.as_ref())
+        let connecting = origami::cranes::broker::connect_options(state.config.nats_auth.as_ref())
             .event_callback(move |event| {
                 let connection_lost = callback_connection.clone();
                 async move {
@@ -3256,9 +3256,12 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                     }
                 }
             })
-            .connect(&nats_url)
-            .await
-        {
+            .connect(&nats_url);
+        let connected = tokio::select! {
+            _ = state.cancellation.cancelled() => return,
+            connected = connecting => connected,
+        };
+        let client = match connected {
             Ok(client) => client,
             Err(_) => {
                 publish_receipt_degradation(&state, "AKASHA delivery broker is unavailable").await;
@@ -3269,7 +3272,11 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
             }
         };
         let context = async_nats::jetstream::new(client);
-        let stream = match context.get_stream(RECEIPT_STREAM_NAME).await {
+        let found = tokio::select! {
+            _ = state.cancellation.cancelled() => return,
+            found = context.get_stream(RECEIPT_STREAM_NAME) => found,
+        };
+        let stream = match found {
             Ok(stream) => stream,
             Err(_) => {
                 publish_receipt_degradation(
@@ -3283,38 +3290,40 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                 continue;
             }
         };
-        let mut consumer = match stream
-            .create_consumer(async_nats::jetstream::consumer::pull::Config {
-                name: Some(format!("athanor-host-receipts-{}", Uuid::new_v4().simple())),
-                description: Some(
-                    "Bounded ephemeral Host replay of sanitized Paper Boat receipts".into(),
-                ),
-                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
-                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
-                ack_wait: ACK_WAIT,
-                max_deliver: MAX_DELIVER,
-                filter_subject: RECEIPT_SUBJECT.into(),
-                max_ack_pending: MAX_ACK_PENDING,
-                max_batch: MAX_BATCH,
-                max_expires: MAX_EXPIRES,
-                // The seam: this is a genuinely different consumer on the same
-                // stream as origami's cranes broker, not a drifted copy of it.
-                // The broker's lane consumers are durable ledger writers whose
-                // cursor must outlive a restart; this one is ephemeral -- named
-                // per connection, discarded after inactive_threshold, and read
-                // only to refill one live socket. A cursor nobody will resume
-                // has no reason to touch disk, so storage is memory and the
-                // consumer is allowed to disappear with the client. That is why
-                // memory_storage disagrees with broker's `false`, and why this
-                // config carries no durable_name and no CONSUMER_BACKOFF: a
-                // ten-minute backoff would outlive the socket it serves.
-                inactive_threshold: RECEIPT_CONSUMER_IDLE_TTL,
-                num_replicas: NUM_REPLICAS,
-                memory_storage: true,
-                ..Default::default()
-            })
-            .await
-        {
+        let config = async_nats::jetstream::consumer::pull::Config {
+            name: Some(format!("athanor-host-receipts-{}", Uuid::new_v4().simple())),
+            description: Some(
+                "Bounded ephemeral Host replay of sanitized Paper Boat receipts".into(),
+            ),
+            deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+            ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+            ack_wait: ACK_WAIT,
+            max_deliver: MAX_DELIVER,
+            filter_subject: RECEIPT_SUBJECT.into(),
+            max_ack_pending: MAX_ACK_PENDING,
+            max_batch: MAX_BATCH,
+            max_expires: MAX_EXPIRES,
+            // The seam: this is a genuinely different consumer on the same
+            // stream as origami's cranes broker, not a drifted copy of it.
+            // The broker's lane consumers are durable ledger writers whose
+            // cursor must outlive a restart; this one is ephemeral -- named
+            // per connection, discarded after inactive_threshold, and read
+            // only to refill one live socket. A cursor nobody will resume
+            // has no reason to touch disk, so storage is memory and the
+            // consumer is allowed to disappear with the client. That is why
+            // memory_storage disagrees with broker's `false`, and why this
+            // config carries no durable_name and no CONSUMER_BACKOFF: a
+            // ten-minute backoff would outlive the socket it serves.
+            inactive_threshold: RECEIPT_CONSUMER_IDLE_TTL,
+            num_replicas: NUM_REPLICAS,
+            memory_storage: true,
+            ..Default::default()
+        };
+        let created = tokio::select! {
+            _ = state.cancellation.cancelled() => return,
+            created = stream.create_consumer(config) => created,
+        };
+        let mut consumer = match created {
             Ok(consumer) => consumer,
             Err(_) => {
                 publish_receipt_degradation(

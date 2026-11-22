@@ -188,6 +188,32 @@ impl RoomStateStore {
     }
 }
 
+/// The room-state file of a room that has never run. `athanor summon` writes
+/// it into the installation folder of a new room; [`RoomStateStore::load`]
+/// and [`RoomStateStore::identity`] accept it.
+pub fn fresh_room_state(room: &str, spirit: &str, operator: &str) -> Value {
+    serde_json::json!({
+        "version": 1,
+        "room": room,
+        "operator": operator,
+        "agentName": spirit,
+        "embodiedSpirit": spirit,
+        "recallPolicy": {
+            "requestedMode": "auto",
+            "resolvedMode": "conversation",
+            "activeProject": null,
+            "resolutionReason": "default",
+            "lastRefreshReason": null,
+            "lastRefreshAt": null,
+            "workingSetEntries": 0,
+            "recoveryPending": false,
+            "recoveryTerms": [],
+            "degraded": null,
+            "updatedAt": null
+        }
+    })
+}
+
 fn migrate_file(current: &Path, legacy: &Path) -> Result<(), String> {
     match fs::symlink_metadata(current) {
         Ok(_) => return Ok(()),
@@ -712,7 +738,7 @@ fn atomic_text_write(path: &Path, text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::RoomStateStore;
+    use super::{RoomStateStore, fresh_room_state};
     use protocol::{RecallRequestedMode, RecallResolvedMode};
     use serde_json::{Value, json};
     use std::fs;
@@ -747,6 +773,31 @@ mod tests {
         assert_eq!(written["recallPolicy"]["requestedMode"], "mixed");
         assert_eq!(reloaded.requested_mode, RecallRequestedMode::Mixed);
         assert_eq!(reloaded.resolved_mode, RecallResolvedMode::Mixed);
+
+        fs::remove_dir_all(dir).expect("fixture cleanup");
+    }
+
+    #[test]
+    fn a_fresh_room_state_loads_and_names_its_spirit_and_operator() {
+        let dir = std::env::temp_dir().join(format!("athanor-store-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("fixture directory");
+        let path = dir.join("athanor-house-state.json");
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&fresh_room_state("skoll", "Sköll", "sol")).unwrap(),
+        )
+        .expect("state file");
+        let store = RoomStateStore::new(path, "skoll".into());
+
+        assert_eq!(
+            store.load().expect("a fresh room file loads").requested_mode,
+            RecallRequestedMode::Auto
+        );
+        let identity = store.identity("Sköll").expect("a fresh room has an identity");
+        assert_eq!(
+            (identity.room.as_str(), identity.spirit.as_str(), identity.operator.as_str()),
+            ("skoll", "Sköll", "sol")
+        );
 
         fs::remove_dir_all(dir).expect("fixture cleanup");
     }

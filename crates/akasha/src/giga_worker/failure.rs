@@ -14,7 +14,6 @@ pub(super) enum WorkerFailureKind {
     SourceHashMismatch,
     SourceWindowTooLarge,
     ResonanceStorage,
-    PrivacyRefused,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -41,7 +40,6 @@ impl WorkerFailure {
             WorkerFailureKind::SourceHashMismatch => "GigaSourceHashMismatchError",
             WorkerFailureKind::SourceWindowTooLarge => "GigaSourceWindowTooLargeError",
             WorkerFailureKind::ResonanceStorage => "GigaResonanceStorageError",
-            WorkerFailureKind::PrivacyRefused => "GigaPrivacyRefused",
         }
     }
 

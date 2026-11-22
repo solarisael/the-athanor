@@ -70,8 +70,8 @@ pub async fn choose_orihon(
         }},
     }).to_string();
 
-    if packet.len() > MAX_PACKET_BYTES || is_secret(&packet) {
-        return json!({"status":"refused","reason":"packet_privacy_or_size"});
+    if packet.len() > MAX_PACKET_BYTES {
+        return json!({"status":"refused","reason":"packet_oversize"});
     }
     if credential.is_none_or(str::is_empty) {
         return json!({"status":"unavailable","reason":"credential_unavailable"});

@@ -235,11 +235,19 @@ impl RecallPolicySession {
         let recovery_due = self.recovery_state.is_pending();
         let recovery_query_terms = self.recovery_state.terms();
         let planned_action = plan.map(|plan| plan.action);
+        // A name that canon holds earns a search when the plan says Skip.
+        // enough: only recognized entities qualify. A Skip for a statement or
+        // for an answered question stays a skip. Widen this rule only with
+        // measured cases (issue #4).
+        let named_skip = planned_action == Some(RecallPlanAction::Skip)
+            && resolved_mode == RecallResolvedMode::Conversation
+            && !facts.query_route.recognized_entities.is_empty();
         let eligible = resolved_mode != RecallResolvedMode::Quiet
             && (recovery_due
                 || match planned_action {
                     Some(RecallPlanAction::Search) => true,
-                    Some(RecallPlanAction::Skip | RecallPlanAction::Reuse) => false,
+                    Some(RecallPlanAction::Skip) => named_skip,
+                    Some(RecallPlanAction::Reuse) => false,
                     None => explicit_lookup || technical,
                 });
         let route_terms = unique_terms(
@@ -304,6 +312,8 @@ impl RecallPolicySession {
             Some("topic-change")
         } else if eligible && planned_action == Some(RecallPlanAction::Search) {
             Some("query-plan-search")
+        } else if eligible && named_skip {
+            Some("named-entity-skip")
         } else if eligible && stale {
             Some("stale-working-set")
         } else {
@@ -870,6 +880,26 @@ mod tests {
         input.query_route.intent = "memory_lookup".into();
         input.query_route.terms = vec!["remember".into(), "jasmine".into(), "tea".into()];
         let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+
+        assert!(!decision.action.refreshes());
+    }
+
+    #[test]
+    fn a_skip_plan_with_a_canon_name_searches_in_conversation_mode() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        let mut input = planned_facts(protocol::RecallPlanAction::Skip);
+        input.query_route.recognized_entities = vec!["orchard".into()];
+        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+
+        assert!(decision.action.refreshes());
+    }
+
+    #[test]
+    fn a_skip_plan_with_a_canon_name_stays_a_skip_in_work_mode() {
+        let mut session = session(RecallResolvedMode::Work, 0);
+        let mut input = planned_facts(protocol::RecallPlanAction::Skip);
+        input.query_route.recognized_entities = vec!["orchard".into()];
+        let decision = session.evaluate(RecallRequestedMode::Work, input);
 
         assert!(!decision.action.refreshes());
     }

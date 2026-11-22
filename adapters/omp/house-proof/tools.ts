@@ -339,15 +339,57 @@ function gigaToolFailure(error) {
 }
 
 
+// OMP removes an unknown key from a strict schema before `execute` and
+// reports success. A plain object schema passes the key through, so the
+// refusal lives here and the tool schemas stay non-strict.
+//
+// `pi.zod` in OMP is not Zod: an object schema has no `shape`, and its keys
+// are in `ir.props`. The tests use real Zod, so both layouts are read.
+export function schemaArgumentKeys(parameters) {
+  if (parameters?.shape) return Object.keys(parameters.shape);
+
+  const props = parameters?.ir?.props;
+
+  if (Array.isArray(props)) return props.map(prop => prop.key);
+
+  return undefined;
+}
+
+// enough: root keys only; check nested objects when a nested key is dropped.
+export function unknownArgumentKeys(known, params) {
+  if (params === null || typeof params !== "object") return [];
+
+  return Object.keys(params).filter(key => !known.includes(key));
+}
+
 export function registerHouseTool(pi, definition) {
   const execute = definition.execute;
   const renderers = createToolRenderers(definition.label, definition.name);
+  const known = schemaArgumentKeys(definition.parameters);
+
+  if (!known) {
+    throw new Error(
+      `${definition.name}: cannot read the argument keys of the schema, so unknown keys cannot be refused`,
+    );
+  }
+
   pi.registerTool({
     ...definition,
     ...renderers,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       emitToolUpdate(onUpdate, definition.name);
       beginHouseToolFeedback(ctx, definition.label);
+      const unknown = unknownArgumentKeys(known, params);
+
+      if (unknown.length > 0) {
+        const accepted = known.length > 0 ? `It accepts: ${known.join(", ")}.` : "It accepts no arguments.";
+        const result = refuseToolResult(
+          `${definition.name} does not accept: ${unknown.join(", ")}. ${accepted}`,
+        );
+        completeHouseToolFeedback(ctx, definition.label, result);
+        return result;
+      }
+
       try {
         const result = normalizeToolResponse(
           await execute(toolCallId, params, signal, onUpdate, ctx),
@@ -1967,7 +2009,7 @@ export function registerSolarisaelTools(pi, release) {
       reviewClass: z.enum(["R0", "R1", "R2", "R3"]).optional().describe("Review class frozen at activation. Required by activate."),
       acceptanceCriteria: z.array(z.string()).optional().describe("Named criteria, at least one, frozen at activation and settled one by one. Required by activate."),
       idempotencyKey: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
-    }).strict(),
+    }),
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding, capability } = docketWriteBinding(ctx);
@@ -2052,7 +2094,7 @@ export function registerSolarisaelTools(pi, release) {
       states: z.array(z.string()).optional().describe("Quest states to include, such as offered or claimed. Omit for offered and claimed; pass [\"all\"] for every state."),
       limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum quests; positive integer. Omit for the substrate default."),
       titlesOnly: z.boolean().optional().describe("When true, every quest comes back with an empty body, so a long board stays small enough to pick from by title."),
-    }).strict(),
+    }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);

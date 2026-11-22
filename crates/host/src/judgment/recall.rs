@@ -24,9 +24,6 @@ fn validate_context(context: &[RecallContextTurn]) -> Result<(), &'static str> {
         if turn.text.chars().count() > 600 {
             return Err("context-oversize");
         }
-        if is_secret(&turn.text) || is_secret(&turn.turn_id) {
-            return Err("privacy-refused");
-        }
     }
 
     Ok(())
@@ -165,9 +162,6 @@ fn validate_plans(
         {
             return Err("invalid-plans");
         }
-        if is_secret(&serde_json::to_string(plan).map_err(|_| "invalid-plans")?) {
-            return Err("privacy-refused");
-        }
     }
 
     Ok(())
@@ -198,8 +192,8 @@ pub(super) async fn plan(
     if end <= now_ms() {
         return refused("refused", "deadline");
     }
-    if prompt.trim().is_empty() || is_secret(&prompt) {
-        return refused("refused", "privacy-refused");
+    if prompt.trim().is_empty() {
+        return refused("refused", "empty-prompt");
     }
     if let Err(reason) =
         validate_context(&context).and_then(|()| validate_plans(&candidates, &context))

@@ -3,8 +3,8 @@ use crate::{
     AppError, Config,
     room_marker::read_room_marker_async,
     typesafe::{
-        TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES, TYPESAFE_MODEL, is_secret,
-        jev_giga_policy_from_marker, request_provider,
+        TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES, TYPESAFE_MODEL, jev_giga_policy_from_marker,
+        request_provider,
     },
 };
 use hearth::OperatorKey;
@@ -430,17 +430,6 @@ fn judgment_questions(plan: &JudgmentPlan) -> Map<String, Value> {
     questions
 }
 
-pub(super) fn value_contains_secret(value: &Value) -> bool {
-    match value {
-        Value::String(text) => is_secret(text),
-        Value::Array(values) => values.iter().any(value_contains_secret),
-        Value::Object(values) => values
-            .iter()
-            .any(|(key, value)| is_secret(key) || value_contains_secret(value)),
-        Value::Null | Value::Bool(_) | Value::Number(_) => false,
-    }
-}
-
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -453,9 +442,6 @@ async fn request(
     body: String,
     recall_revision: Option<&str>,
 ) -> Result<String, WorkerFailure> {
-    if is_secret(&body) {
-        return Err(WorkerFailure::new(WorkerFailureKind::PrivacyRefused));
-    }
     if body.len() > TYPESAFE_MAX_PACKET_BYTES {
         return Err(WorkerFailure::new(WorkerFailureKind::ClassifierRequest));
     }
@@ -473,18 +459,11 @@ async fn request(
     Ok(raw)
 }
 
-/// Serialize one judgment request. Secret-like state is refused, never sent.
 pub(super) fn judgment_body(
     config: &GigaClassifierConfig,
     event_state: &Value,
     plan: &JudgmentPlan,
 ) -> Result<String, WorkerFailure> {
-    if value_contains_secret(event_state)
-        || is_secret(&plan.source_id)
-        || plan.lookup.iter().any(|option| is_secret(option))
-    {
-        return Err(WorkerFailure::new(WorkerFailureKind::PrivacyRefused));
-    }
     serde_json::to_string(&json!({
         "model": TYPESAFE_MODEL,
         "state": {
@@ -580,12 +559,7 @@ pub(super) async fn resonance(
     state: Value,
     candidate_ids: &[String],
 ) -> Result<(String, Vec<(String, f64)>), WorkerFailure> {
-    if candidate_ids.is_empty()
-        || value_contains_secret(&state)
-        || candidate_ids
-            .iter()
-            .any(|candidate_id| is_secret(candidate_id))
-    {
+    if candidate_ids.is_empty() {
         return Err(WorkerFailure::new(WorkerFailureKind::ClassifierRequest));
     }
     let body = serde_json::to_string(&json!({

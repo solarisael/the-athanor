@@ -30,6 +30,7 @@ the exact implementation record.
 - The route of a query no longer has the field `shouldAutoRecall`. Recall telemetry no longer writes the keys `should_auto_recall` and `route_should_auto_recall`. No part of the House used these values to make a decision.
 - The Host and the GIGA worker no longer refuse a TypeSafe request when its text looks like a secret. The check matched ordinary prose, such as `password:` or a word that ends in `sk-`, and refused 59 of 533 Recall reranks in one room. An empty query, prompt, or excerpt now has its own refusal reason.
 - Each House tool now refuses an argument key that it does not know. The error names the key and lists the accepted keys. Before this change, the tool ignored the key and reported success.
+- `docs/VOCABULARY.md` defines 22 more House words, from `harness` to `quest`. Bellows is now the House word for an adapter.
 - Orihon Fold keeps the current prefix when one background merge makes a small change.
 - A new message can publish a partial merge batch. Background jobs publish only a substantial reduction.
 - Orihon Fold sends only the latest size correction when it retries a compactor request.

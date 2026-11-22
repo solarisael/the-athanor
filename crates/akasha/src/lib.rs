@@ -27,6 +27,7 @@ mod remember;
 mod restart;
 pub mod room_marker;
 pub mod settings;
+pub mod spirit_texts;
 pub mod state;
 mod timeline;
 mod typesafe;

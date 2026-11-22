@@ -16,5 +16,7 @@ mod server;
 mod store;
 mod viewport;
 
-pub use config::{HostConfig, KNOCK_AUTONOMY_ENV, KnockAutonomy};
-pub use house::{HostRuntime, start};
+pub use config::{HostConfig, HouseConfig, KNOCK_AUTONOMY_ENV, KnockAutonomy};
+pub use house::{HostRuntime, RoomFactory, RoomSource, start};
+pub use store::fresh_room_state;
+pub use akasha::spirits::SpiritRecord;

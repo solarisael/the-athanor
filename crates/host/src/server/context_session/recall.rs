@@ -25,6 +25,8 @@ pub(super) async fn analysis(
         prompt: request.prompt.clone(),
         recognized_entities,
         context_characters: request.context_characters,
+        context_window_tokens: request.context_window_tokens,
+        compaction_threshold_tokens: request.compaction_threshold_tokens,
         active_spirit: identity.spirit,
         operator: identity.operator,
         routing_mode_enabled: room_state["routingMode"]["enabled"] == true,

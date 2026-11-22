@@ -261,6 +261,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0050_spirit_texts.sql",
         sql: include_str!("../../../substrate/migrations/0050_spirit_texts.sql"),
     },
+    Migration {
+        version: 51,
+        name: "0051_spirits.sql",
+        sql: include_str!("../../../substrate/migrations/0051_spirits.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

@@ -239,10 +239,11 @@ Exit proof:
 4. The room stays after a Host restart.
 5. An unknown room key gets a refusal.
 
+Status (issue #31): table `spirits` (migration 0051) holds the room key, the spirit name, and the operator. The Host opens and closes rooms while it runs (`docs/ARCHITECTURE.md` section 3.1). `athanor summon ROOM SPIRIT --operator NAME` makes a room in one command. It writes the room folder `data/rooms/<room>` and nothing under `roomsRoot`. Exit proofs 1, 3, 4, and 5 have integration tests. Exit proof 2 (no `AGENTS.md`) is still open.
+
 Unverified points:
 
-- The Host builds one router from a room list at start (`docs/ARCHITECTURE.md` section 3.1). A change of that list at run time is new work.
-- OMP names session folders after the working directory (`athanor.nix:11`). A room without a folder needs a working directory rule.
+- OMP names session folders after the working directory (`athanor.nix:11`). A new room starts in `data/rooms/<room>`.
 
 ### Slice 4: one flow for install and the first summoning
 

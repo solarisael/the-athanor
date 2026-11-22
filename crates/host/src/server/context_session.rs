@@ -48,6 +48,8 @@ struct ContextPrepareRequest {
     history: Vec<HistoryTurn>,
     existing_block_kinds: Vec<BlockKind>,
     context_characters: u64,
+    context_window_tokens: Option<u64>,
+    compaction_threshold_tokens: Option<u64>,
     user_turn_ordinal: u64,
     fresh_conversation: bool,
     active_project: Option<String>,

@@ -1,4 +1,4 @@
-use host::{HostConfig, KNOCK_AUTONOMY_ENV, KnockAutonomy, start};
+use host::{HostConfig, HouseConfig, KNOCK_AUTONOMY_ENV, KnockAutonomy, RoomSource, start};
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -69,18 +69,26 @@ async fn run() -> Result<(), String> {
         KnockAutonomy::from_optional(env::var(KNOCK_AUTONOMY_ENV).ok().as_deref())?;
     let room = config.room;
     let session = format!("app:{room}");
-    let host_config = HostConfig {
+    let house = HouseConfig {
         bind,
         bearer_token,
-        room_dir: config.room_dir,
-        state_dir: config.state_dir,
         house_id: config.house_id,
-        room: room.clone(),
-        spirit: config.spirit,
-        session,
         database_url: Some(substrate.database_url),
         nats_url: substrate.nats_url,
         nats_auth,
+    };
+    let host_config = HostConfig {
+        bind: house.bind,
+        bearer_token: house.bearer_token.clone(),
+        room_dir: config.room_dir,
+        state_dir: config.state_dir,
+        house_id: house.house_id.clone(),
+        room: room.clone(),
+        spirit: config.spirit,
+        session,
+        database_url: house.database_url.clone(),
+        nats_url: house.nats_url.clone(),
+        nats_auth: house.nats_auth.clone(),
         knock_autonomy,
         operator: config.operator,
     };
@@ -95,7 +103,7 @@ async fn run() -> Result<(), String> {
     #[cfg(not(unix))]
     let interrupt = tokio::signal::ctrl_c();
 
-    let runtime = start(vec![host_config])?;
+    let runtime = start(house, RoomSource::Configured(vec![host_config]))?;
     let ready = serde_json::json!({
         "status": "ready",
         "address": runtime.address().to_string(),

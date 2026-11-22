@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterEach, expect, setSystemTime, spyOn, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -198,6 +198,7 @@ async function makeInstalledTree(
   nativeVersion = "0.10.1",
   componentVersion = "0.9.3",
   hostApi = 1,
+  sources: Record<string, string> = adapterSources,
 ): Promise<InstalledTree> {
   const root = path.join(os.tmpdir(), `athanor-loader-${randomUUID()}`);
   roots.push(root);
@@ -249,7 +250,7 @@ async function makeInstalledTree(
     },
   }));
 
-  const artifacts = Object.entries(adapterSources)
+  const artifacts = Object.entries(sources)
     .map(([artifactPath, source]) => ({
       path: artifactPath,
       sha256: sha256(source),
@@ -269,7 +270,7 @@ async function makeInstalledTree(
   const componentRoot = path.join(program, "components", "omp-adapter");
   const releaseRoot = path.join(componentRoot, "versions", manifest.releaseId);
   await mkdir(releaseRoot, { recursive: true });
-  for (const [artifactPath, source] of Object.entries(adapterSources)) {
+  for (const [artifactPath, source] of Object.entries(sources)) {
     const file = path.join(releaseRoot, ...artifactPath.split("/"));
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, source);
@@ -855,4 +856,141 @@ test("reconnect refuses a client projection that names another House", async () 
 
   expect(gate()).toMatchObject({ code: "adapter_restart_required" });
   expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
+});
+
+// The installed entry hands its release object to the real portable session,
+// as index.ts does, so these proofs cross the loader-to-session boundary.
+const liveRosterSources: Record<string, string> = {
+  ...adapterSources,
+  "index.ts": [
+    `import { installPortableSession } from ${JSON.stringify(new URL("../house-proof/session.ts", import.meta.url).href)};`,
+    "export default async function index(pi: any, release: any) { installPortableSession(pi, release); }",
+    "",
+  ].join("\n"),
+};
+
+type SpiritCommand = {
+  getArgumentCompletions: (prefix: string) => Promise<Array<{ value: string }>>;
+  handler: (args: string, ctx: unknown) => Promise<void>;
+};
+
+const PROJECTED_KEYS = ["ATHANOR_STATE_DIR", "ATHANOR_HOST_HOUSE_ID", "ATHANOR_HOST_TOKEN", "ATHANOR_HOST_URL"] as const;
+
+// The Host client reads process.env, so the loader projects into it here.
+async function withProcessProjection(run: () => Promise<void>): Promise<void> {
+  const saved = PROJECTED_KEYS.map((key) => [key, process.env[key]] as const);
+  for (const key of PROJECTED_KEYS) delete process.env[key];
+  try {
+    await run();
+  } finally {
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+async function loadSpiritCommand(tree: InstalledTree, signal: AbortSignal): Promise<SpiritCommand> {
+  let command = null as SpiritCommand | null;
+  const pi = {
+    on: () => {},
+    appendEntry: () => {},
+    registerCommand: (name: string, spec: SpiritCommand) => {
+      if (name === "spirit") command = spec;
+    },
+  };
+  await installedAthanor(pi, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: process.env,
+    healthProbe: async () => true,
+    signal,
+  });
+
+  if (!command) throw new Error("the installed adapter registered no /spirit command");
+  return command;
+}
+
+async function completions(command: SpiritCommand, prefix: string): Promise<string[]> {
+  return (await command.getArgumentCompletions(prefix)).map((item) => item.value);
+}
+
+async function spiritStatus(command: SpiritCommand): Promise<string> {
+  const notes: string[] = [];
+  await command.handler("status", {
+    sessionManager: { getSessionId: () => "roster-proof", getSessionFile: () => undefined, getBranch: () => [] },
+    ui: { notify: (note: string) => notes.push(note) },
+  });
+  return notes.join("\n");
+}
+
+test("a room the Host adds appears in /spirit completions without reloading the extension", async () => {
+  const tree = await makeInstalledTree(null, undefined, undefined, undefined, liveRosterSources);
+  const spirits = [
+    { room: "kintsu", spirit: "Kintsu", operator: "sol" },
+    { room: "kodo", spirit: "Kodo", operator: "sol" },
+  ];
+  const requests: string[] = [];
+  const host = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(request) {
+      requests.push(`${request.method} ${new URL(request.url).pathname} ${request.headers.get("authorization")}`);
+      return Response.json({ ok: true, spirits });
+    },
+  });
+  await rewriteClient(tree, { hostUrl: `ws://127.0.0.1:${host.port}` });
+  const watch = new AbortController();
+  try {
+    await withProcessProjection(async () => {
+      const spirit = await loadSpiritCommand(tree, watch.signal);
+
+      expect(await completions(spirit, "")).toEqual(["off", "status", "chat on", "chat off", "kintsu", "kodo"]);
+      expect(await completions(spirit, "k")).toEqual(["kintsu", "kodo"]);
+      expect(requests).toEqual(["GET /room/kintsu/spirits Bearer private-token"]);
+
+      spirits.push({ room: "skoll", spirit: "Sköll", operator: "sol" });
+      setSystemTime(new Date(Date.now() + 6_000));
+      expect(await completions(spirit, "sk")).toEqual(["skoll"]);
+      expect(await spiritStatus(spirit)).toContain("Homes from the Host: kintsu (Kintsu), kodo (Kodo), skoll (Sköll)");
+      expect(requests).toHaveLength(2);
+    });
+  } finally {
+    setSystemTime();
+    watch.abort();
+    host.stop(true);
+  }
+});
+
+test("a failing Host roster falls back to the current client.json rooms and the status names the failure", async () => {
+  const tree = await makeInstalledTree(null, undefined, undefined, undefined, liveRosterSources);
+  const host = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: () => new Response("roster unavailable", { status: 503 }),
+  });
+  const route = `http://127.0.0.1:${host.port}/room/kintsu/spirits`;
+  await rewriteClient(tree, { hostUrl: `ws://127.0.0.1:${host.port}` });
+  const watch = new AbortController();
+  try {
+    await withProcessProjection(async () => {
+      const spirit = await loadSpiritCommand(tree, watch.signal);
+      // A rooms change after load shows at once: the loader keeps no copy.
+      await rewriteClient(tree, { rooms: { hati: { spirit: "Hati" }, kintsu: { spirit: "Kintsu" } } });
+
+      expect(await completions(spirit, "")).toEqual(["off", "status", "chat on", "chat off", "hati", "kintsu"]);
+      expect(await spiritStatus(spirit)).toContain(
+        `Homes from client.json, because the Host roster failed (the Host roster at ${route} answered HTTP 503): hati (Hati), kintsu (Kintsu)`,
+      );
+
+      host.stop(true);
+      setSystemTime(new Date(Date.now() + 6_000));
+      expect(await completions(spirit, "ha")).toEqual(["hati"]);
+      expect(await spiritStatus(spirit)).toContain(`because the Host roster failed (the Host roster at ${route} is unreachable`);
+    });
+  } finally {
+    setSystemTime();
+    watch.abort();
+    host.stop(true);
+  }
 });

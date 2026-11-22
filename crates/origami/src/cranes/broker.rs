@@ -36,6 +36,12 @@ pub fn connect_options(auth: Option<&NatsAuth>) -> async_nats::ConnectOptions {
     }
 }
 
+/// The durable hallway consumer of one room. A Host removes it when the room
+/// leaves the spirit record.
+pub fn hallway_consumer_name(room: &str) -> String {
+    format!("athanor-hallway-{room}-v1")
+}
+
 // Live wire names — JetStream and house-host both hold them, so a
 // change here is a migration, never a rename.
 pub const BOAT_READY_STREAM_NAME: &str = "ATHANOR_BOAT_READY";
@@ -206,7 +212,7 @@ impl Broker {
         room: &str,
     ) -> Result<consumer::PullConsumer> {
         let stream = Self::hallway_stream(context).await?;
-        let name = format!("athanor-hallway-{room}-v1");
+        let name = hallway_consumer_name(room);
         let expected = Self::lane_consumer_config(
             &name,
             "Durable trigger for PostgreSQL hallway inbox projection",

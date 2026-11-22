@@ -27,6 +27,7 @@ import { startChatDoorman, stopChatDoorman } from "../house-proof/chat.ts";
 import { MODE_DOOR_LINES, MODE_DOOR_TYPE, resetModeDoors } from "../house-proof/mode-door.ts";
 import type { ResolvedRecallMode } from "../house-proof/recall-policy.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "../house-proof/constants.ts";
+import { modelContextWindow } from "../house-proof/context.ts";
 
 const ROOM_KEY = "origin-room";
 const ROOM = path.join(tmpdir(), "athanor-generated-turn-origin", ROOM_KEY);
@@ -34,7 +35,7 @@ const PRESENCE = "athanor-presence-context";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
-function registerAdapter(): Map<string, Handler[]> {
+function registerAdapter(settings?: Record<string, unknown>): Map<string, Handler[]> {
   const handlers = new Map<string, Handler[]>();
   const pi = {
     zod: z,
@@ -49,6 +50,7 @@ function registerAdapter(): Map<string, Handler[]> {
     registerMessageRenderer() {},
     registerCommand() {},
     registerTool() {},
+    ...(settings ? { pi: { settings: { get: (key: string) => settings[key] } } } : {}),
   };
   solarisaelHouseProof(pi as any);
   return handlers;
@@ -193,6 +195,9 @@ function fakeHost() {
     compiles: () => commands
     .filter((command) => command.command_or_event_type === "athanor.context.prepare")
     .map((command) => ({ turnId: command.context_prepare.turnId, userText: command.context_prepare.prompt })),
+    prepareRequests: () => commands
+      .filter((command) => command.command_or_event_type === "athanor.context.prepare")
+      .map((command) => command.context_prepare),
     directives: () => commands.filter((command) => command.command_or_event_type === "athanor.room.state")
       .map((command) => command.room_request),
     lessonPlans: () => commands.filter((command) => command.command_or_event_type === "athanor.context.lesson_plan"),
@@ -655,6 +660,25 @@ test("native user turns keep their identity keys, with and without an OMP id", a
   const out = await runContext([unnamed]);
   const block = presenceAfter(out, unnamed);
   expect(block.details.turnId).toBe(`ord:1:${Bun.hash("shalom dummy").toString(36)}`);
+});
+
+test("context preparation sends the active model's window and OMP's compaction point on it", async () => {
+  handlers = registerAdapter({ "compaction.enabled": true, "compaction.thresholdPercent": 80 });
+  const wide = { ...ctx(), model: { provider: "fixture", id: "wide", contextWindow: 1_000_000 } };
+  await beforeAgentStart("shalom dummy", wide);
+  await runContext([user("u1", "shalom dummy")], wide);
+
+  expect(host.prepareRequests().at(-1)).toMatchObject({ contextWindowTokens: 1_000_000, compactionThresholdTokens: 800_000 });
+});
+
+test("an unknown model window sends nothing, and disabled compaction sends only the window", () => {
+  const enabled = { get: (key: string) => ({ "compaction.enabled": true } as Record<string, unknown>)[key] };
+
+  expect(modelContextWindow(undefined, enabled)).toEqual({});
+  expect(modelContextWindow({ contextWindow: 0 }, enabled)).toEqual({});
+  expect(modelContextWindow({ contextWindow: 200_000 }, undefined)).toEqual({ contextWindowTokens: 200_000 });
+  // OMP's default reserve is 15% of the window.
+  expect(modelContextWindow({ contextWindow: 200_000 }, enabled)).toEqual({ contextWindowTokens: 200_000, compactionThresholdTokens: 170_000 });
 });
 
 test("generated turns never send native-user directive authority", async () => {

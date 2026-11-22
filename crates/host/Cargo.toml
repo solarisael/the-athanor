@@ -30,6 +30,7 @@ sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+tower = { version = "0.5", features = ["util"] }
 uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]
@@ -37,4 +38,4 @@ base64 = "0.22"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-tower = { version = "0.5", features = ["util"] }
+tokio-tungstenite = "0.28"

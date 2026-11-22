@@ -507,6 +507,18 @@ function parseClientProjection(value: unknown): ClientProjection {
   };
 }
 
+function readClientProjection(userProfilePath: string): ClientProjection {
+  const userProfile = physicalDirectory(userProfilePath, "operator profile root");
+  return parseClientProjection(readJson(
+    regularFileWithin(
+      userProfile,
+      ".omp/agent/athanor/client.json",
+      "client projection",
+    ),
+    "client projection",
+  ));
+}
+
 const HEALTH_REQUEST_TIMEOUT_MS = 500;
 const HOST_WATCH_INTERVAL_MS = 30_000;
 
@@ -628,15 +640,7 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
   }
   const entrypoints = verifyArtifacts(releaseRoot, manifest);
 
-  const userProfile = physicalDirectory(userProfilePath, "operator profile root");
-  const client = parseClientProjection(readJson(
-    regularFileWithin(
-      userProfile,
-      ".omp/agent/athanor/client.json",
-      "client projection",
-    ),
-    "client projection",
-  ));
+  const client = readClientProjection(userProfilePath);
   // The keys this loader projected, as opposed to keys the operator set. Only
   // these may be refreshed from the client projection on a later reconnect.
   const projected: string[] = [];
@@ -656,7 +660,9 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     previousReleaseId: pointer.previousReleaseId,
     healthEndpoint: scopedHealthEndpoint(client.hostUrl, client.defaultRoom),
     hostApi: native.hostApi,
-    rooms: client.rooms,
+    defaultRoom: client.defaultRoom,
+    // Rereads client.json on each call so the fallback roster is never stale.
+    clientRooms: () => readClientProjection(userProfilePath).rooms,
     programRoot: programRoot.logical,
     userProfile: userProfilePath,
     stateRoot: client.stateRoot,
@@ -746,8 +752,10 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
   await athanor.default(pi, {
     releaseId: modules.releaseId,
     previousReleaseId: modules.previousReleaseId,
-    // The configured homes `/spirit` lists; the Host still authorizes each one.
-    rooms: modules.rooms,
+    // The Host roster names the homes `/spirit` lists. The client.json rooms
+    // stand in only while the Host cannot answer.
+    defaultRoom: modules.defaultRoom,
+    clientRooms: modules.clientRooms,
     reconnectGate: reconnectGate(modules, options),
   });
   await hygiene.default(pi);

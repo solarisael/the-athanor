@@ -521,7 +521,7 @@ The installer has no room mode. It offers `install`, `update`,
 `uninstall`, and `purge` (`manage.rs:32-134`). It refuses an installed version
 (`installer.rs:217-223`). It never writes `harnesses.json`.
 
-Manual configuration does not require a new release.
+Add a room with `athanor summon ROOM SPIRIT --operator NAME`. A new release, a NixOS rebuild, and a Host restart are not necessary. The command writes the room to table `spirits` and makes the room folder `data/rooms/<room>` with its marker, room-state file, and `host/` state folder. The running Host opens the room. Use `athanor retire ROOM` to close a room and `athanor rename OLD NEW` to move a room that never woke.
 The following inventory is not a verified installation procedure.
 Keeper capability provisioning and the exact Host stop/start procedure remain undocumented here.
 Do not treat this inventory as an end-to-end room setup guide.

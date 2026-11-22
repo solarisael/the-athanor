@@ -14,7 +14,7 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { hostSessionIdentity } from "./host.ts";
+import { fetchHostSpirits, hostSessionIdentity } from "./host.ts";
 import { homeLaunchRoom, isValidRoomKey } from "./room.ts";
 import { PortableSessionError, sessionRequest } from "./session-transport.ts";
 import { captureTernTerminal, ternLauncher, type Launcher, type TernTerminal } from "./tern-capture.ts";
@@ -873,9 +873,59 @@ function contextBlock(attachment: Attachment): string {
   ].join("\n");
 }
 
-type ReleaseRooms = Record<string, { spirit?: string }> | undefined;
+type ClientRooms = Record<string, { spirit?: string }>;
+// The loader names the default room from client.json and rereads the
+// client.json rooms on each call; the Host roster is the authority.
+type ReleaseRoster = { defaultRoom?: string; clientRooms?: () => ClientRooms };
+type Roster = { homes: Array<{ room: string; spirit: string }>; failure: string | null };
 
-function statusLines(ctx: any, rooms: ReleaseRooms): string[] {
+// Tab completion reads the roster on each key press; the cache keeps it fast.
+const ROSTER_CACHE_MS = 5_000;
+
+function clientRoster(release: ReleaseRoster | null | undefined): Roster["homes"] {
+  return Object.entries(release?.clientRooms?.() ?? {})
+    .map(([room, identity]) => ({ room, spirit: text(identity?.spirit) || "?" }))
+    .sort((left, right) => (left.room < right.room ? -1 : left.room > right.room ? 1 : 0));
+}
+
+// Never rejects: completion and status show a failure, they do not throw it.
+async function readRoster(release: ReleaseRoster | null | undefined): Promise<Roster> {
+  const defaultRoom = text(release?.defaultRoom);
+  let failure = "no installed default room names a Host route";
+  if (defaultRoom) {
+    try {
+      const spirits = await fetchHostSpirits(defaultRoom);
+      return { homes: spirits.map(({ room, spirit }) => ({ room, spirit })), failure: null };
+    } catch (error) {
+      failure = message(error);
+    }
+  }
+
+  try {
+    return { homes: clientRoster(release), failure };
+  } catch (error) {
+    return { homes: [], failure: `${failure}; client.json is unreadable: ${message(error)}` };
+  }
+}
+
+function rosterReader(release: ReleaseRoster | null | undefined): () => Promise<Roster> {
+  let cached: { at: number; roster: Promise<Roster> } | null = null;
+  return () => {
+    const now = Date.now();
+    if (!cached || now - cached.at >= ROSTER_CACHE_MS) cached = { at: now, roster: readRoster(release) };
+    return cached.roster;
+  };
+}
+
+function homesLine({ homes, failure }: Roster): string {
+  const listed = homes.map(({ room, spirit }) => `${room} (${spirit})`).join(", ");
+  if (!failure) return listed ? `Homes from the Host: ${listed}` : "Homes from the Host: none active; name the room key.";
+  return listed
+    ? `Homes from client.json, because the Host roster failed (${failure}): ${listed}`
+    : `Homes: unavailable, because the Host roster failed (${failure}) and no client.json rooms are installed; name the room key.`;
+}
+
+function attachmentLines(ctx: any): string[] {
   const attachment = sessionAttachment(ctx);
   const lines: string[] = [];
   if (!attachment) {
@@ -890,15 +940,11 @@ function statusLines(ctx: any, rooms: ReleaseRooms): string[] {
       lines.push(`Terminal ${attachment.terminal ? `tern session ${attachment.terminal.session} pane ${attachment.terminal.pane}` : attachment.terminalReason || "none"}`);
     }
   }
-  const configured = Object.entries(rooms ?? {});
-  lines.push(configured.length
-    ? `Configured homes: ${configured.map(([room, identity]) => `${room} (${text(identity?.spirit) || "?"})`).join(", ")}`
-    : "Configured homes: unavailable without the installed client projection; name the room key.");
   return lines;
 }
 
-export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms; reconnectGate?: ReconnectGate } | null): void {
-  const rooms = release?.rooms;
+export function installPortableSession(pi: any, release?: ReleaseRoster & { reconnectGate?: ReconnectGate } | null): void {
+  const roster = rosterReader(release);
   reconnectGate = release?.reconnectGate ?? null;
   const runtime: Runtime = {
     pi, ctx: null, key: null, pollTimer: null, heartbeatTimer: null, polling: false,
@@ -1015,8 +1061,9 @@ export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms
 
   pi.registerCommand?.("spirit", {
     description: "Attach this conversation to an Athanor home (/spirit <room>), detach (/spirit off), show status (/spirit), or claim room chat (/spirit chat on|off)",
-    getArgumentCompletions: (prefix: string) => {
-      const options = ["off", "status", "chat on", "chat off", ...Object.keys(rooms ?? {})];
+    getArgumentCompletions: async (prefix: string) => {
+      const { homes } = await roster();
+      const options = ["off", "status", "chat on", "chat off", ...homes.map(({ room }) => room)];
       return options.filter((option) => option.startsWith(prefix.trim())).map((option) => ({ value: option, label: option }));
     },
     handler: async (args: string, ctx: any) => {
@@ -1030,7 +1077,7 @@ export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms
       const switched = bindRuntime(runtime, ctx);
       if (switched) await detachAttachment(switched, "conversation switched");
       if (verb === "status") {
-        ctx.ui.notify(statusLines(ctx, rooms).join("\n"), "info");
+        ctx.ui.notify([...attachmentLines(ctx), homesLine(await roster())].join("\n"), "info");
         return;
       }
       if (verb === "chat") {
@@ -1055,11 +1102,11 @@ export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms
         pi.appendEntry(SELECTION_ENTRY, { room: null });
         await restore(runtime, ctx);
         await announceChange(pi, ctx);
-        ctx.ui.notify(statusLines(ctx, rooms)[0], "info");
+        ctx.ui.notify(attachmentLines(ctx)[0], "info");
         return;
       }
       if (!isValidRoomKey(verb)) {
-        ctx.ui.notify(`"${verb}" is not a room key. ${statusLines(ctx, rooms).at(-1)}`, "error");
+        ctx.ui.notify(`"${verb}" is not a room key. ${homesLine(await roster())}`, "error");
         return;
       }
       const previous = sessionAttachment(ctx);

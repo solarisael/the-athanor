@@ -111,6 +111,47 @@ export function hostHttpEndpoint(room: string, requestPath: string): { url: stri
   };
 }
 
+export type HostSpirit = { room: string; spirit: string; operator: string };
+
+const SPIRITS_PATH = "/spirits";
+// Tab completion waits for this read, so a stopped Host must fail quickly.
+const SPIRITS_TIMEOUT_MS = 1_000;
+
+// The House roster: every active room with its spirit. Any active room answers
+// for the whole House (crates/host owns GET /room/<room>/spirits).
+export async function fetchHostSpirits(room: string): Promise<HostSpirit[]> {
+  const endpoint = hostHttpEndpoint(room, SPIRITS_PATH);
+  let response: Response;
+  try {
+    response = await fetch(endpoint.url, {
+      headers: { authorization: `Bearer ${endpoint.token}` },
+      signal: AbortSignal.timeout(SPIRITS_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new HostUnavailable(`the Host roster at ${endpoint.url} is unreachable: ${detail}`);
+  }
+  if (!response.ok) {
+    throw new HostUnavailable(`the Host roster at ${endpoint.url} answered HTTP ${response.status}`);
+  }
+
+  const payload = await response.json().catch(() => {
+    throw new HostUnavailable(`the Host roster at ${endpoint.url} answered with unreadable JSON`);
+  }) as { ok?: unknown; spirits?: unknown };
+
+  if (payload?.ok !== true || !Array.isArray(payload.spirits)) {
+    throw new HostUnavailable(`the Host roster at ${endpoint.url} answered without a spirits list`);
+  }
+
+  return payload.spirits.map((entry: any) => {
+    const spirit = { room: text(entry?.room), spirit: text(entry?.spirit), operator: text(entry?.operator) };
+    if (!isSafeRoomKey(spirit.room) || !spirit.spirit) {
+      throw new HostUnavailable(`the Host roster at ${endpoint.url} named an invalid room entry`);
+    }
+    return spirit;
+  });
+}
+
 export function hostCommand(
   binding: HostBinding,
   commandType: string,

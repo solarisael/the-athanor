@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { HostUnavailable, hostCommand, sendHostCommand, type HostBinding } from "./host.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./constants.ts";
+import { compactionThresholdTokens } from "./boat-door.ts";
 
 export const CONTEXT_BLOCK_TYPES = {
   "room-context": "athanor-room-context",
@@ -45,6 +46,8 @@ export type ContextPrepareRequest = {
   history: Array<{ kind: "user" | "assistant" | "generated"; text: string; turnId: string | null }>;
   existingBlockKinds: ContextBlockKind[];
   contextCharacters: number;
+  contextWindowTokens?: number;
+  compactionThresholdTokens?: number;
   userTurnOrdinal: number;
   freshConversation: boolean;
   activeProject: string | null;
@@ -59,6 +62,31 @@ export type ContextPrepareRequest = {
   legacyRejection?: "unpaired-surrogate" | null;
   priorPresence: { frameId: string; frameRendered: string } | null;
 };
+
+type HarnessSettings = { get(key: string): unknown } | undefined;
+
+/** The active model's context window and the token count where OMP starts compaction on it. */
+export function modelContextWindow(
+  model: { contextWindow?: unknown } | undefined,
+  settings: HarnessSettings,
+): Pick<ContextPrepareRequest, "contextWindowTokens" | "compactionThresholdTokens"> {
+  const window = Number(model?.contextWindow);
+
+  if (!Number.isFinite(window) || window < 1) return {};
+
+  const contextWindowTokens = Math.round(window);
+
+  if (!settings?.get("compaction.enabled")) return { contextWindowTokens };
+
+  const threshold = compactionThresholdTokens(contextWindowTokens, {
+    thresholdTokens: settings.get("compaction.thresholdTokens") as number | undefined,
+    thresholdPercent: settings.get("compaction.thresholdPercent") as number | undefined,
+    reserveTokens: settings.get("compaction.reserveTokens") as number | undefined,
+  });
+
+  if (threshold < 1) return { contextWindowTokens };
+  return { contextWindowTokens, compactionThresholdTokens: threshold };
+}
 
 export function contextBlockKind(customType: unknown): ContextBlockKind | undefined {
   return (Object.keys(CONTEXT_BLOCK_TYPES) as ContextBlockKind[]).find((kind) => CONTEXT_BLOCK_TYPES[kind] === customType);

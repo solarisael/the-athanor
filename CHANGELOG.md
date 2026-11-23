@@ -85,6 +85,15 @@ the exact implementation record.
 - The `athanor` Host writes its log to stderr, which journald keeps under
   systemd. The default level is `info`; `RUST_LOG` changes it. Before this
   change, the Host log went nowhere.
+- A Host refusal now reaches the agent with the Host's own code, message,
+  `retryable` flag, and details. Before this change, a `command_failed` lost
+  its `error` object: an organ tool reported `host_refused` and a tool that
+  sends its own Host command reported `transport_unavailable`, which suggests
+  a retry that cannot succeed. A refusal with only a `reason` is `host_refused`.
+- `home_resources`, `home_resource_write`, `house_sessions`, `session_control`,
+  and the `zoom` child-log pages now keep the code and fields of a refusal,
+  such as `revision_conflict` with `currentRevision`. Before this change, the
+  agent got `tool_failure` with the message "Athanor tool failed".
 
 ## [0.7.0] - 2026-11-14
 

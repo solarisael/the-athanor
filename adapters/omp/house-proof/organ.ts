@@ -42,17 +42,26 @@ export async function requestOrgan(
   try {
     response = await sendHostCommand(command, RESULT, signal, timeoutMs, { settleDefinitively: write });
   } catch (error) {
+    if (error instanceof HostRefused) {
+      throw new OrganError(error.message, error.code, error.retryable, {
+        ...error.details,
+        execution: {
+          request_dispatched: error.dispatched,
+          write_outcome: "not_started",
+          retry: error.retryable ? "safe_now" : "after_change",
+        },
+      });
+    }
     if (error instanceof HostUnavailable) {
-      if (write && error.dispatched && !(error instanceof HostRefused)) {
+      if (write && error.dispatched) {
         throw new OrganError(`Native ${operation} outcome is unknown after dispatch`, "outcome_unknown", false, {
           execution: { request_dispatched: true, write_outcome: "unknown", retry: "reconcile_first" },
           cause: error.message,
         });
       }
-      throw new OrganError(error.message, error instanceof HostRefused ? "host_refused" : error.code,
-        !(error instanceof HostRefused), {
-          execution: { request_dispatched: error.dispatched, write_outcome: "not_started", retry: error instanceof HostRefused ? "after_change" : "safe_now" },
-        });
+      throw new OrganError(error.message, error.code, true, {
+        execution: { request_dispatched: error.dispatched, write_outcome: "not_started", retry: "safe_now" },
+      });
     }
     throw error;
   }

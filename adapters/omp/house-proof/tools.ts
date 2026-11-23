@@ -62,7 +62,8 @@ import { PortableSessionError } from "./session-transport.ts";
 import { childTranscriptFile, readRecordedImages, readTranscriptPage, sessionFileById } from "./orihon/transcript.ts";
 
 // Host session answers travel verbatim; a refusal keeps the Host's own code
-// (revision_conflict carries currentRevision, path_invalid names traversal).
+// (revision_conflict carries currentRevision, path_invalid names traversal)
+// because canonicalError lifts the nested `error` object (feedback.ts).
 async function sessionToolResult(work: () => Promise<Record<string, unknown>>) {
   try {
     const result = await work();

@@ -30,12 +30,38 @@ export class HostUnavailable extends Error {
 
 // The Host answered and said no. Every caller that treats absence as
 // degradation keeps doing so; only a retry loop needs the distinction, because
-// asking again does not change a refusal.
+// asking again does not change a refusal. The Host's own code, retryable flag
+// and details travel with it; a bare `reason` refusal is `host_refused`.
 export class HostRefused extends HostUnavailable {
-  constructor(message: string) {
+  retryable: boolean;
+  details: Record<string, unknown> | undefined;
+  constructor(
+    message: string,
+    { code = "host_refused", retryable = false, details }: { code?: string; retryable?: boolean; details?: Record<string, unknown> } = {},
+  ) {
     super(message);
     this.name = "HostRefused";
+    this.code = code;
+    this.retryable = retryable;
+    this.details = details;
   }
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+// command_failed carries `error: {code, message, retryable, details?}`
+// (crates/host/src/server/native_commands.rs result_response); command_refused
+// carries only `reason`.
+function hostRefusal(response: HostResponse): HostRefused {
+  const failure = record(response.error) ?? {};
+  const details = failure.details === undefined ? undefined : record(failure.details) ?? { upstream_details: failure.details };
+  return new HostRefused(text(failure.message) || text(response.reason) || "Athanor Host rejected the command", {
+    code: text(failure.code) || "host_refused",
+    retryable: failure.retryable === true,
+    details,
+  });
 }
 
 function text(value: unknown): string {
@@ -265,7 +291,7 @@ export async function sendHostCommand(
       if (response.correlation_id !== command.message_id) return;
       const kind = text(response.command_or_event_type);
       if (kind.endsWith("command_refused") || kind.endsWith("command_failed")) {
-        finish(new HostRefused(text(response.reason) || "Athanor Host rejected the command"));
+        finish(hostRefusal(response));
       } else if (acceptedTypes.has(kind)) {
         finish(null, response);
       }

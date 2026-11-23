@@ -399,7 +399,10 @@ async function buildDocumentation(siteStyles) {
     resolve(source),
     documentationOutputPath(source)
   ]));
-  routes.set(resolve(root, "LESSONS.jsonl"), join(output, "LESSONS.jsonl"));
+  const lessonFiles = (await readdir(join(root, "lessons"))).filter(name => name.endsWith(".jsonl"));
+  for (const name of lessonFiles) {
+    routes.set(resolve(root, "lessons", name), join(output, "lessons", name));
+  }
   const historySource = resolve(sourceDocs, "history");
   const historyTarget = join(outputDocs, "history", "index.html");
   routes.set(historySource, historyTarget);
@@ -425,7 +428,10 @@ async function buildDocumentation(siteStyles) {
   for (const file of ["LICENSE", "NOTICE"]) {
     await cp(join(root, file), join(outputDocs, "project", file));
   }
-  await cp(join(root, "LESSONS.jsonl"), join(output, "LESSONS.jsonl"));
+  await mkdir(join(output, "lessons"), { recursive: true });
+  for (const name of lessonFiles) {
+    await cp(join(root, "lessons", name), join(output, "lessons", name));
+  }
 
   const historySources = documentationSources.filter(source => {
     const historyRelativePath = relative(historySource, source);

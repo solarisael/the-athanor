@@ -24,7 +24,8 @@ async function fixture(t) {
   for (const name of ["README.md", "INSTALL.md", "USAGE.md", "IDENTITY_GUIDE.md", "CHANGELOG.md", "HOUSE.md", "LICENSE", "NOTICE"]) {
     await writeFile(join(directory, name), "# Public documentation\n");
   }
-  await writeFile(join(directory, "LESSONS.jsonl"), '{"type":"coding","ids":[9],"limit":50}\n');
+  await mkdir(join(directory, "lessons"));
+  await writeFile(join(directory, "lessons/start.jsonl"), '{"type":"coding","ids":[9],"limit":50}\n');
   return directory;
 }
 

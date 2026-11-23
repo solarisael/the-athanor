@@ -906,7 +906,7 @@ fn routing_reminder(enabled: bool) -> Option<String> {
             "Default modus operandi for delegable work:",
             "1. Main model owns intent, inference, and final judgment.",
             "2. Use house_lane_status/house_dispatch before spawning task/subagents when work is bounded and delegable.",
-            "3. When work targets The Athanor, read the project-root LESSONS.jsonl before implementation or fanout. Submit every line unchanged to lessons, once per task. Check every requested family and ID, then read every returned body.",
+            "3. When work targets The Athanor, read the project-root lessons/ query files: start.jsonl at session start, then plan.jsonl, build.jsonl, prove.jsonl, and ship.jsonl when the work reaches that stage. Submit every line of a file unchanged to lessons, once per task. Check every requested family and ID, then read every returned body before that stage.",
             "4. Before dispatch, pass the complete returned bodies in lessonBodies. Bare IDs and summaries are not delivery. A failed query or missing requested lesson forbids editing and spawning. Apply each lesson when its trigger matches; retrieval does not widen scope.",
             "5. Do not route casual contact, high-level judgment, or exact-sensitive work without exact/retrieve-only context.",
             "6. Advisor is a separate review channel, not a dispatch lane.",

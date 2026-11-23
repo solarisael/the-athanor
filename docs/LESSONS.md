@@ -5,17 +5,26 @@ The 2026-10-04 census did not walk `crates/akasha`; claims below keep their earl
 
 Lessons preserve reusable guidance in typed stores. They are not a second name for memories.
 
-## Repository query file
+## Repository query files
 
-The root [LESSONS.jsonl](../LESSONS.jsonl) contains complete arguments for the `lessons` organ.
+The `lessons/` folder contains complete arguments for the `lessons` organ, one file for each stage of the work.
 Each line is one query. PostgreSQL owns the returned bodies.
 
-1. Read each line as JSON before implementation or fanout.
-2. Submit every line unchanged to `xd://lessons`, once per task.
-3. Check every requested ID within its stated family.
-4. Read every returned body before editing.
-5. Give workers the complete bodies, inline or through a shared packet.
-6. Stop before editing or spawning if a query fails or a requested record is missing.
+| File | Stage |
+|---|---|
+| [start.jsonl](../lessons/start.jsonl) | At the start of each session. Where the work runs, lessons first, verification posture. |
+| [plan.jsonl](../lessons/plan.jsonl) | Before the first edit or fanout. Existing behavior, architecture, state, decomposition. |
+| [build.jsonl](../lessons/build.jsonl) | Before you write code. Naming, structure, refusal, language and design rules. |
+| [prove.jsonl](../lessons/prove.jsonl) | Before you write a test or report work as done. Evidence, boundaries, live proof. |
+| [ship.jsonl](../lessons/ship.jsonl) | Before a commit, push, pull request, issue, or deploy. Prose, cleanup, branches. |
+
+1. Read `start.jsonl` at the start of each session.
+2. Read each other file when the work reaches its stage.
+3. Submit every line of a file unchanged to `xd://lessons`, once per task.
+4. Check every requested ID within its stated family.
+5. Read every returned body before you start that stage.
+6. Give workers the complete bodies of their stages, inline or through a shared packet.
+7. Stop before editing or spawning if a query fails or a requested record is missing.
 
 Apply each lesson when its trigger matches the task.
 Retrieval does not reopen parked work or expand the assignment.
@@ -23,15 +32,21 @@ Folder-specific instructions, including the Pulse interaction rules, still apply
 Read the current roadmap, architecture, and evidence before implementation.
 Historical source gates do not override those documents.
 
-The file uses the same line format as Multistock.
+Each line uses the same format as Multistock.
 No Markdown extraction, route selection, or argument construction is required.
-The agent executes these queries; the filename alone does not start a background service.
+The agent executes these queries; the filenames alone do not start a background service.
 Keep batches below the registry's response limit.
-Keep each family-and-ID pair once.
+Keep each family-and-ID pair once in a file. One lesson can be in more than one file.
+The stage is in the file name, not in the line, because `stage` is a filter of the `lessons` organ.
 
-The 2026-10-14 cutover checks 159 records through eight queries.
-These comprise 127 coding lessons, 20 project lessons, and 12 design lessons.
-The queries include familiar lessons 556–564 and the existing delivery guidance.
+The 2026-11-23 split puts 266 lessons into the five files.
+It leaves out 9 lessons that do not apply to this repository:
+
+- Project lessons 70, 130, and 338 and coding lesson 98 describe code or a Windows host that no longer exist.
+- Project lesson 76 records an event, not a rule.
+- Coding lessons 165, 166, 167, and 331 belong to the Godot client in `solarisael/athanor-godot`.
+
+These lessons stay in PostgreSQL.
 
 Coding lessons 161, 162, and 463 were already unavailable.
 The earlier map records approved replacement guidance in 215, 257, and 260.

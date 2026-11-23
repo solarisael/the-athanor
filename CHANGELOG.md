@@ -21,6 +21,7 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
+- The repository lesson queries are now five files in `lessons/`: `start`, `plan`, `build`, `prove`, and `ship`. An agent reads `start.jsonl` at the start of each session and each other file when the work reaches that stage. Before this change, `LESSONS.jsonl` loaded 275 lessons at once. Nine lessons that do not apply to this repository are not in the files; they stay in PostgreSQL.
 - Schema 51 adds table `spirits`: one record for each room, with the spirit name and the operator. The Host now opens, rebuilds, and closes rooms while it runs when the table changes, and `GET /room/<room>/spirits` lists the open rooms. New commands: `athanor summon ROOM SPIRIT --operator NAME`, `athanor retire ROOM`, `athanor rename OLD NEW [--spirit NAME]`, and `athanor spirits`. A summoned room lives in `data/rooms/<room>`; `runtime.json` `rooms` may be empty and only fills an empty table once. Each `<room>-kitten` is now a familiar with the shared lessons.
 - The Recall plan receipt in `recall-turns.jsonl` now records how sure Jev was. It shows the index and the action of the selected plan, the confidence of Jev, and the probability of each candidate plan. It contains no query text. Each record also has the action of the plan that the Host used, with or without a judgment from Jev.
 - Each Recall card that Jev scores now has a label: the title of the memory and the heading of the section. Before this change, Jev got the excerpt only.

@@ -19,16 +19,25 @@ Doc "current source version" claims track the release train, not each hotfix.
 build scripts, not in docs. Sol bumps versions himself when *he* decides a
 release happens. An agent's job ends at `[Unreleased]`.
 
-## Lesson queries — execute before each task
+## Lesson queries — execute at each stage
 
-Read the root `LESSONS.jsonl` before implementation or fanout.
+The `lessons/` folder holds one query file for each stage of the work.
 Each line is a complete argument object for `xd://lessons`.
-Submit every line unchanged, once per task.
+
+| File | Read it |
+|---|---|
+| `lessons/start.jsonl` | at the start of each session, before you read code |
+| `lessons/plan.jsonl` | before the first edit or fanout |
+| `lessons/build.jsonl` | before you write code |
+| `lessons/prove.jsonl` | before you write a test or report work as done |
+| `lessons/ship.jsonl` | before a commit, push, pull request, issue, or deploy |
+
+Submit every line of a file unchanged, once per task.
 Check that every requested ID returns within its stated family.
-Read every returned body before the first edit.
-Give workers the complete returned bodies, inline or through a shared packet.
+Read every returned body before you start that stage.
+Give workers the complete returned bodies of their stages, inline or through a shared packet.
 Do not skip a batch or replace bodies with bare IDs.
-Stop before editing if a query fails or a requested record is missing.
+Stop if a query fails or a requested record is missing.
 
 PostgreSQL owns the lesson bodies.
 Apply each lesson when its trigger matches the task.

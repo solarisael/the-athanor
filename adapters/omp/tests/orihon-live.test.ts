@@ -121,7 +121,7 @@ async function turnFixture(fail: boolean, run: (handler: Function, ctx: any, mes
         requests.push(request);
         const response = JSON.stringify({
           correlation_id: request.message_id, command_or_event_type: "athanor.organ.result",
-          ...(fail ? { error: { code: "orihon_view_not_ready", message: "required leaf is pending", retryable: true } } : {
+          ...(fail ? { failure: { class: "conflict", code: "orihon_view_not_ready", message: "required leaf is pending", hops: [] } } : {
             result: { ok: true, ready: true, purpose: "turn", complete: true, prefixChanged: false,
               instructionsVersion: "orihon-live-v1", chat: { revision: 1, units: 1, throughSeq: 1,
                 bytes: 26, lines: 1, blocks: [], tail: "<chat>\n0+1|old summary\n</chat>" } },

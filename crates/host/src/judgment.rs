@@ -6,6 +6,7 @@ use akasha::{
     TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES as MAX_PACKET_BYTES, TYPESAFE_MODEL,
     jev_giga_policy, request_provider,
 };
+use protocol::Failure;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::{
@@ -118,7 +119,7 @@ pub async fn execute(
     house_dir: Option<&Path>,
     room: &str,
     request: JudgmentRequest,
-) -> Result<Value, String> {
+) -> Result<Value, Failure> {
     let marker = read_marker(room_dir, house_dir).await;
     match request {
         JudgmentRequest::RecallPolicy { grant } => {
@@ -252,7 +253,11 @@ fn grant_policy(
     }
 }
 
-pub(crate) async fn giga_policy(room_dir: &Path, house_dir: Option<&Path>, room: &str) -> Option<String> {
+pub(crate) async fn giga_policy(
+    room_dir: &Path,
+    house_dir: Option<&Path>,
+    room: &str,
+) -> Option<String> {
     jev_giga_policy(room_dir, house_dir, room).await
 }
 

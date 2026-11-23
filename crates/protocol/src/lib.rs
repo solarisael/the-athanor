@@ -1,5 +1,6 @@
 //! Newline-delimited JSON wire protocol, version 1.
 mod contract;
+mod failure;
 pub mod harness;
 mod host;
 /// One-use launch manifests of Host-driven terminal relaunches.
@@ -10,6 +11,7 @@ pub mod organ;
 pub mod restart;
 
 pub use contract::*;
+pub use failure::*;
 pub use host::*;
 
 use hearth::{

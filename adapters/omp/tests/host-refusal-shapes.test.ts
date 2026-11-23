@@ -6,12 +6,14 @@ import { z } from "zod";
 import { registerSolarisaelTools } from "../house-proof/tools.ts";
 import { __sessionTest } from "../house-proof/session.ts";
 
-// #57: a Host `command_failed` kept only `reason` and surfaced as
-// transport_unavailable. #58: a nested `{error: {code, message}}` refusal
-// surfaced as tool_failure / "Athanor tool failed".
+// A Host failure reaches the tool result with its class, code, message and
+// hops, on the organ path and on a direct sendHostCommand path (#57, #56 A1).
+// A nested `{error: {code, message}}` session refusal keeps its code (#58).
 
 const KEYS = ["ATHANOR_HOST_URL", "ATHANOR_HOST_TOKEN", "ATHANOR_HOST_HOUSE_ID", "ATHANOR_CLIENT_ROOM_DIR"] as const;
-const HOST_FAILURE = { code: "native_request_failed", message: "the lane table is unreadable", retryable: false };
+const HOP = { layer: "host", file: "crates/host/src/server/native_commands.rs", line: 8, op: "routing_status" };
+const HOST_FAILURE = { class: "input_refused", code: "invalid_request", message: "the lane table is unreadable", hops: [HOP] };
+const ORGAN_FAILURE = { class: "conflict", code: "knock_state_conflict", message: "the knock was already claimed", hops: [HOP] };
 const CONFLICT = { code: "revision_conflict", message: "the document changed since it was read", currentRevision: "sha256:feed" };
 
 let directory = "";
@@ -35,11 +37,11 @@ beforeEach(() => {
     websocket: {
       message(socket, input) {
         const request = JSON.parse(String(input));
+        const organ = request.command_or_event_type === "athanor.organ.call";
         socket.send(JSON.stringify({
           correlation_id: request.message_id,
-          command_or_event_type: `athanor.${request.projection_id}.command_failed`,
-          reason: HOST_FAILURE.message,
-          error: HOST_FAILURE,
+          command_or_event_type: organ ? "athanor.organ.result" : `athanor.${request.projection_id}.command_failed`,
+          failure: organ ? ORGAN_FAILURE : HOST_FAILURE,
         }));
       },
     },
@@ -77,21 +79,24 @@ async function runTool(name: string, params: Record<string, unknown>) {
   return await tools.get(name)!.execute("call-1", params, undefined, undefined, ctx());
 }
 
-test("a Host command_failed reaches an organ tool with the Host's code", async () => {
+test("an organ failure reaches the tool with its class, code and hops", async () => {
   const result = await runTool("canon_read", { name: "Perseus" });
 
   expect(result.isError).toBe(true);
-  expect(result.details.code).toBe("native_request_failed");
-  expect(result.details.message).toBe(HOST_FAILURE.message);
+  expect(result.details.code).toBe("knock_state_conflict");
+  expect(result.details.message).toBe(ORGAN_FAILURE.message);
   expect(result.details.retryable).toBe(false);
+  expect(result.details.details.class).toBe("conflict");
+  expect(result.details.details.hops).toEqual([HOP]);
 });
 
-test("a Host command_failed reaches a direct sendHostCommand tool with the Host's code", async () => {
+test("a Host command_failed reaches a direct sendHostCommand tool with its class and code", async () => {
   const result = await runTool("house_lane_status", {});
 
   expect(result.isError).toBe(true);
-  expect(result.details.code).toBe("native_request_failed");
+  expect(result.details.code).toBe("invalid_request");
   expect(result.details.message).toBe(HOST_FAILURE.message);
+  expect(result.details.details.class).toBe("input_refused");
 });
 
 test("home_resource_write refused with revision_conflict keeps its code and currentRevision", async () => {

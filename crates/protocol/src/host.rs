@@ -2062,16 +2062,58 @@ pub struct DeltaEvent {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(from = "CommandOutcomeWire")]
 pub struct CommandOutcomeEvent {
     #[serde(flatten)]
     pub meta: EventMeta,
-    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<crate::Failure>,
     #[serde(default)]
     pub version: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<RecallPolicyState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision: Option<RecallPolicyDecision>,
+}
+
+// Receipts saved before slice A1 (`recall-policy-receipts.json`) carry only a
+// `reason` string, and an idempotent replay sends them again. They load as a
+// `legacy_refusal`, so a replayed refusal stays a refusal.
+#[derive(Deserialize)]
+struct CommandOutcomeWire {
+    #[serde(flatten)]
+    meta: EventMeta,
+    #[serde(default)]
+    failure: Option<crate::Failure>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    version: u64,
+    #[serde(default)]
+    state: Option<RecallPolicyState>,
+    #[serde(default)]
+    decision: Option<RecallPolicyDecision>,
+}
+
+impl From<CommandOutcomeWire> for CommandOutcomeEvent {
+    fn from(wire: CommandOutcomeWire) -> Self {
+        let failure = wire.failure.or_else(|| {
+            wire.reason.map(|reason| crate::Failure {
+                class: crate::FailureClass::Internal,
+                code: "legacy_refusal".into(),
+                message: reason,
+                hops: Vec::new(),
+                details: None,
+            })
+        });
+        Self {
+            meta: wire.meta,
+            failure,
+            version: wire.version,
+            state: wire.state,
+            decision: wire.decision,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

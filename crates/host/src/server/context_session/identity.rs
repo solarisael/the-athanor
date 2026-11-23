@@ -13,13 +13,14 @@ pub(super) async fn synchronize(
     request: &mut ContextPrepareRequest,
 ) -> Result<IdentitySync, String> {
     let mut runtime = state.runtime.lock().await;
-    let authentication = authenticate_presence(state, meta)?;
+    let authentication = authenticate_presence(state, meta).map_err(|failure| failure.message)?;
     let root = crate::room_state::execute(
         &state.room_store,
         &state.config.room_dir,
         &state.config.spirit,
         crate::room_state::RoomStateRequest::Read,
-    )?;
+    )
+    .map_err(|failure| failure.message)?;
     if root["embodiedSpirit"] != authentication.binding.spirit
         || root["operator"] != authentication.binding.operator
     {
@@ -267,7 +268,8 @@ pub(super) async fn fence<'a>(
         &state.config.room_dir,
         &state.config.spirit,
         crate::room_state::RoomStateRequest::Read,
-    )?;
+    )
+    .map_err(|failure| failure.message)?;
     if saved.identity_epoch.as_deref() != Some(fingerprint(&root)?.as_str()) {
         return Err(
             "identity epoch changed before context publication; retry with its current binding"
@@ -306,13 +308,14 @@ pub(super) async fn replay_eligible(
     turn: &str,
 ) -> Result<bool, String> {
     let mut runtime = state.runtime.lock().await;
-    let authentication = authenticate_presence(state, meta)?;
+    let authentication = authenticate_presence(state, meta).map_err(|failure| failure.message)?;
     let root = crate::room_state::execute(
         &state.room_store,
         &state.config.room_dir,
         &state.config.spirit,
         crate::room_state::RoomStateRequest::Read,
-    )?;
+    )
+    .map_err(|failure| failure.message)?;
     if saved.version != cache::CONTEXT_VERSION
         || saved.identity_epoch.as_deref() != Some(fingerprint(&root)?.as_str())
         || !saved.turns.iter().any(|entry| entry.turn_id == turn)

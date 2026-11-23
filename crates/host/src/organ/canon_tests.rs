@@ -19,7 +19,7 @@ impl Fixture {
         operation: OrganOperation,
         target_scope: OrganTargetScope,
         params: Value,
-    ) -> Result<Value, ProtocolErrorBody> {
+    ) -> Result<Value, Failure> {
         eprintln!("Host request {operation:?} target={target_scope:?} params={params}");
         let Value::Object(params) = params else {
             panic!("organ params must be an object");
@@ -40,8 +40,8 @@ impl Fixture {
         )
         .await
         {
-            ResponsePayload::Result { result } => Ok(result),
-            ResponsePayload::Error { error } => {
+            Ok(result) => Ok(result),
+            Err(error) => {
                 eprintln!(
                     "Host refusal {operation:?}: {}: {}",
                     error.code, error.message
@@ -204,7 +204,8 @@ fn entities(result: &Value) -> &[Value] {
         .expect("CanonRead returns entities")
 }
 
-fn assert_invalid_params(error: ProtocolErrorBody, message: &str) {
+fn assert_invalid_params(error: Failure, message: &str) {
+    assert_eq!(error.class, FailureClass::InputRefused);
     assert_eq!(error.code, "invalid_params");
     assert_eq!(error.message, message);
 }

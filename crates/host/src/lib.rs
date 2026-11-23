@@ -1,5 +1,6 @@
 mod chat;
 mod config;
+mod failure_map;
 mod house;
 mod insula;
 mod judgment;
@@ -16,8 +17,8 @@ mod server;
 mod store;
 mod viewport;
 
+pub use akasha::spirits::SpiritRecord;
 pub use config::{HostConfig, HouseConfig, KNOCK_AUTONOMY_ENV, KnockAutonomy};
 pub use house::{HostRuntime, RoomFactory, RoomSource, start};
 pub use server::reference_span as agents_reference_span;
 pub use store::fresh_room_state;
-pub use akasha::spirits::SpiritRecord;

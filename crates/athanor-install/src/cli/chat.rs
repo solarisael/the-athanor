@@ -148,9 +148,11 @@ async fn talk(arguments: &[String]) -> Result<()> {
                         }
                     }
                     "athanor.chat.command_refused" => {
+                        let failure = &event["failure"];
                         eprintln!(
-                            "refused: {}",
-                            event["reason"].as_str().unwrap_or("(no reason)")
+                            "refused ({}): {}",
+                            failure["class"].as_str().unwrap_or("unknown"),
+                            failure["message"].as_str().unwrap_or("(no message)")
                         );
                     }
                     _ => {}

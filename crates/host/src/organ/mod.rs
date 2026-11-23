@@ -6,14 +6,13 @@ mod worker_lifecycle;
 mod canon_tests;
 pub(crate) use giga::{GigaRoomWorker, capture as capture_giga, serve as serve_giga};
 
-use crate::HostConfig;
+use crate::{HostConfig, failure_map};
 use akasha::insula_writer::{end_span, start_span};
 use akasha::native::{self, ProtocolRequest};
 use akasha::{AppError, Config, TrustedBinding};
 use protocol::organ::{OrganOperation, OrganRequest};
 use protocol::{
-    CommandMeta, ProtocolError, ProtocolErrorBody, RequestEnvelope, ResponseEnvelope,
-    ResponsePayload,
+    CommandMeta, Failure, FailureClass, RequestEnvelope, ResponseEnvelope, ResponsePayload,
 };
 use serde_json::{Map, Value};
 use sqlx::PgPool;
@@ -40,16 +39,9 @@ pub(crate) async fn call(
     mut request: OrganRequest,
     giga_worker: &Mutex<GigaRoomWorker>,
     live: &orihon::live::Room,
-) -> ResponsePayload<Value> {
+) -> Result<Value, Failure> {
     let method = request.operation.method();
-    let bound = match bound_host_config(host, meta) {
-        Ok(bound) => bound,
-        Err(error) => {
-            return ResponsePayload::Error {
-                error: error.protocol_error_body(&method),
-            };
-        }
-    };
+    let bound = bound_host_config(host, meta)?;
     let host = &bound;
     if matches!(
         request.operation,
@@ -61,59 +53,52 @@ pub(crate) async fn call(
             | OrganOperation::OrihonZoom
             | OrganOperation::OrihonDate
     ) {
-        return orihon::call(host, pool, meta, request, live).await;
+        return into_result(orihon::call(host, pool, meta, request, live).await, &method);
     }
     if request.operation == OrganOperation::GigaSetEnablement {
         if request.target_scope != protocol::organ::OrganTargetScope::Room {
-            return ResponsePayload::Error {
-                error: ProtocolError::InvalidParams("GIGA enablement is bound to one room".into())
-                    .into(),
-            };
+            return Err(Failure::new(
+                FailureClass::InputRefused,
+                "invalid_params",
+                "invalid parameters: GIGA enablement is bound to one room",
+            ));
         }
         let credential = match request.params.remove("credential") {
             Some(Value::String(value)) if !value.is_empty() => Some(value),
             None | Some(Value::Null) => None,
             _ => {
-                return ResponsePayload::Error {
-                    error: ProtocolError::InvalidParams("invalid GIGA credential".into()).into(),
-                };
+                return Err(Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_params",
+                    "invalid parameters: invalid GIGA credential",
+                ));
             }
         };
         let enablement =
-            match serde_json::from_value::<akasha::GigaEnablement>(Value::Object(request.params)) {
-                Ok(enablement) => enablement,
-                Err(error) => {
-                    return ResponsePayload::Error {
-                        error: ProtocolError::InvalidParams(error.to_string()).into(),
-                    };
-                }
-            };
-        return match giga_worker
+            serde_json::from_value::<akasha::GigaEnablement>(Value::Object(request.params))
+                .map_err(|error| {
+                    Failure::new(
+                        FailureClass::InputRefused,
+                        "invalid_params",
+                        format!("invalid parameters: {error}"),
+                    )
+                })?;
+        return giga_worker
             .lock()
             .await
             .set_enablement(host, pool, enablement, credential)
             .await
-        {
-            Ok(result) => ResponsePayload::Result { result },
-            Err(error) => ResponsePayload::Error {
-                error: error.protocol_error_body(&method),
-            },
-        };
+            .map_err(|error| {
+                failure_map::from_error_body(error.protocol_error_body(&method)).op(&method)
+            });
     }
-    let request = match bound_request(host, meta, request) {
-        Ok(request) => request,
-        Err(error) => {
-            return ResponsePayload::Error {
-                error: error.into(),
-            };
-        }
-    };
+    let request = bound_request(host, meta, request)?;
     // Vault mode keeps worker lifecycle state in the Host runtime journal.
     // With AKASHA enabled the request goes native; there is no fallback
     // between stores in either direction.
     let request = match request {
         ProtocolRequest::WorkerLifecycle(call) if !host.akasha_enabled() => {
-            return worker_lifecycle::call(host, call);
+            return into_result(worker_lifecycle::call(host, call), &method);
         }
         request => request,
     };
@@ -126,7 +111,7 @@ async fn execute_native(
     meta: &CommandMeta,
     request: ProtocolRequest,
     giga_worker: &Mutex<GigaRoomWorker>,
-) -> ResponsePayload<Value> {
+) -> Result<Value, Failure> {
     let method = native::operation_name(&request);
     let health = matches!(&request, ProtocolRequest::SubstrateHealth(_));
     let binding = TrustedBinding {
@@ -147,9 +132,11 @@ async fn execute_native(
         ),
     };
     if let Some(Err(error)) = config.as_ref() {
-        return ResponsePayload::Error {
-            error: error.protocol_error_body(&method),
-        };
+        return Err(Failure::new(
+            FailureClass::Configuration,
+            "configuration",
+            error.to_string(),
+        ));
     }
     if let Some((_, pool)) = runtime {
         failure = Config::validate_pool(pool).await.err();
@@ -191,11 +178,9 @@ async fn execute_native(
                                 .insert("configured".into(), Value::Bool(host.akasha_enabled()));
                         }
                     }
-                    response.payload
+                    into_result(response.payload, method)
                 }
-                Err(_) => ResponsePayload::Error {
-                    error: unknown_outcome(&method),
-                },
+                Err(_) => Err(unknown_outcome(method)),
             }
         }
         Err(_) => {
@@ -204,51 +189,64 @@ async fn execute_native(
                 akasha::OutcomeClass::Error,
                 Some("response_serialization"),
             );
-            ResponsePayload::Error {
-                error: unknown_outcome(&method),
-            }
+            Err(unknown_outcome(method))
         }
     }
 }
 
-fn bound_host_config(host: &HostConfig, meta: &CommandMeta) -> Result<HostConfig, AppError> {
+fn bound_host_config(host: &HostConfig, meta: &CommandMeta) -> Result<HostConfig, Failure> {
     let store = crate::store::RoomStateStore::new(host.room_state_path(), host.room.clone());
-    let spirit = store
-        .embodied_spirit(&host.spirit)
-        .map_err(AppError::Config)?;
+    let spirit = store.embodied_spirit(&host.spirit).map_err(|error| {
+        Failure::new(
+            FailureClass::Configuration,
+            "configuration",
+            format!("configuration error: {error}"),
+        )
+    })?;
     if meta.house_id != host.house_id
         || meta.sender_room != host.room
         || meta.sender_spirit != spirit
         || meta.sender_session.trim().is_empty()
     {
-        return Err(AppError::Refusal {
-            code: "foreign_organ_binding",
-            message: "organ calls require this Host room's current identity",
-        });
+        return Err(Failure::new(
+            FailureClass::NotPermitted,
+            "foreign_organ_binding",
+            "organ calls require this Host room's current identity",
+        ));
     }
     let mut bound = host.clone();
     bound.spirit = spirit;
     Ok(bound)
 }
 
-fn unknown_outcome(method: &str) -> ProtocolErrorBody {
-    ProtocolErrorBody {
-        code: "outcome_unknown".into(),
-        message: format!(
-            "native {method} completed without a usable response; reconcile before retry"
-        ),
-        retryable: false,
-        details: Some(serde_json::json!({
-            "execution": {"request_dispatched": true, "write_outcome": "unknown", "retry": "reconcile_first"}
-        })),
+// Both helpers track their caller, so the hop names the line in this file that
+// met the failure, not the helper.
+#[track_caller]
+fn into_result(payload: ResponsePayload<Value>, method: &str) -> Result<Value, Failure> {
+    match payload {
+        ResponsePayload::Result { result } => Ok(result),
+        ResponsePayload::Error { error } => Err(failure_map::from_error_body(error).op(method)),
     }
+}
+
+#[track_caller]
+fn unknown_outcome(method: &str) -> Failure {
+    Failure::new(
+        FailureClass::OutcomeUnknown,
+        "outcome_unknown",
+        format!("native {method} completed without a usable response; reconcile before retry"),
+    )
+    .op(method)
+    .details(serde_json::json!({
+        "execution": {"request_dispatched": true, "write_outcome": "unknown", "retry": "reconcile_first"}
+    }))
 }
 
 fn bound_request(
     host: &HostConfig,
     meta: &CommandMeta,
     request: OrganRequest,
-) -> Result<ProtocolRequest, ProtocolError> {
+) -> Result<ProtocolRequest, Failure> {
     let mut params = request.params;
     let project_memory = request.operation == OrganOperation::Remember
         && params.get("kind").and_then(Value::as_str) == Some("memory")
@@ -270,8 +268,10 @@ fn bound_request(
                     && !key.contains("--")
             })
             .ok_or_else(|| {
-                ProtocolError::InvalidParams(
-                    "project memory requires a stable lowercase project key".into(),
+                Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_params",
+                    "invalid parameters: project memory requires a stable lowercase project key",
                 )
             })?;
         let project_thread = Value::String(format!("project:{project}"));
@@ -280,7 +280,11 @@ fn bound_request(
             .entry("threads")
             .or_insert_with(|| Value::Array(Vec::new()));
         let threads = threads.as_array_mut().ok_or_else(|| {
-            ProtocolError::InvalidParams("project memory threads must be an array".into())
+            Failure::new(
+                FailureClass::InputRefused,
+                "invalid_params",
+                "invalid parameters: project memory threads must be an array",
+            )
         })?;
         if !threads.contains(&project_thread) {
             threads.push(project_thread);
@@ -297,8 +301,10 @@ fn bound_request(
                 | OrganOperation::MemoryAmend
         )
     {
-        return Err(ProtocolError::InvalidParams(
-            "House target scope is not allowed for this operation".into(),
+        return Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_params",
+            "invalid parameters: House target scope is not allowed for this operation",
         ));
     }
     for key in [
@@ -316,9 +322,11 @@ fn bound_request(
         "operator",
     ] {
         if params.contains_key(key) {
-            return Err(ProtocolError::InvalidParams(format!(
-                "{key} belongs to the Host binding, not organ params"
-            )));
+            return Err(Failure::new(
+                FailureClass::InputRefused,
+                "invalid_params",
+                format!("invalid parameters: {key} belongs to the Host binding, not organ params"),
+            ));
         }
     }
     bind_identity(host, meta, request.operation, &mut params)?;
@@ -331,7 +339,8 @@ fn bound_request(
         method: request.operation.method(),
         params: Value::Object(params),
     })
-    .1?;
+    .1
+    .map_err(|error| failure_map::from_error_body(error.into()))?;
     match request {
         ProtocolRequest::Recall(recall) if !host.akasha_enabled() => {
             Ok(ProtocolRequest::VaultRecall(protocol::VaultRecallParams {
@@ -358,7 +367,7 @@ fn bind_identity(
     meta: &CommandMeta,
     operation: OrganOperation,
     params: &mut Map<String, Value>,
-) -> Result<(), ProtocolError> {
+) -> Result<(), Failure> {
     use OrganOperation::*;
     match operation {
         DesignDocumentQuery | DesignDocumentWrite | SubstrateHealth => {}
@@ -413,7 +422,7 @@ fn bind_restart(
     meta: &CommandMeta,
     operation: OrganOperation,
     params: &mut Map<String, Value>,
-) -> Result<(), ProtocolError> {
+) -> Result<(), Failure> {
     use OrganOperation::*;
     match operation {
         RestartRequest => {
@@ -429,8 +438,10 @@ fn bind_restart(
         }
         RestartTransition => {
             if params.get("to").and_then(Value::as_str) != Some("exiting") {
-                return Err(ProtocolError::InvalidParams(
-                    "the adapter may request only the exiting restart transition".into(),
+                return Err(Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_params",
+                    "invalid parameters: the adapter may request only the exiting restart transition",
                 ));
             }
             put(params, "requesterSession", &meta.sender_session);

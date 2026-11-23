@@ -1,4 +1,5 @@
 use crate::store::{RoomStateStore, timestamp};
+use protocol::{Failure, FailureClass};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 use std::fs;
@@ -52,8 +53,10 @@ pub(crate) fn execute(
     room_dir: &Path,
     configured_spirit: &str,
     request: RoomStateRequest,
-) -> Result<Value, String> {
-    store.migrate_legacy_files(room_dir)?;
+) -> Result<Value, Failure> {
+    store.migrate_legacy_files(room_dir).map_err(|error| {
+        Failure::new(FailureClass::Internal, "room_state_migration_failed", error)
+    })?;
     let mut root = complete_state(store, room_dir, configured_spirit)?;
     let changed = match request {
         RoomStateRequest::Read => return Ok(Value::Object(root)),
@@ -81,10 +84,14 @@ pub(crate) fn execute(
         let now = timestamp();
         root.insert("lastUpdatedAt".into(), Value::String(now));
         let result = Value::Object(root.clone());
-        store.write_room_state(&result)?;
+        store.write_room_state(&result).map_err(|error| {
+            Failure::new(FailureClass::Internal, "room_state_write_failed", error)
+        })?;
         if let Err(error) = write_active_spirit(store, room_dir, &root) {
-            return Err(format!(
-                "room state was saved, but active_spirit.md mirror failed: {error}"
+            return Err(Failure::new(
+                FailureClass::Internal,
+                "active_spirit_mirror_failed",
+                format!("room state was saved, but active_spirit.md mirror failed: {error}"),
             ));
         }
     }
@@ -95,18 +102,28 @@ fn complete_state(
     store: &RoomStateStore,
     room_dir: &Path,
     configured_spirit: &str,
-) -> Result<Map<String, Value>, String> {
-    store.load()?;
+) -> Result<Map<String, Value>, Failure> {
+    store
+        .load()
+        .map_err(|error| Failure::new(FailureClass::Internal, "room_state_unreadable", error))?;
     let mut root = store
-        .read_root()?
+        .read_root()
+        .map_err(|error| Failure::new(FailureClass::Internal, "room_state_unreadable", error))?
         .as_object()
         .cloned()
-        .ok_or_else(|| "room state root must be a JSON object".to_owned())?;
-    let embodied = store.embodied_spirit(configured_spirit)?;
+        .ok_or_else(|| {
+            Failure::new(
+                FailureClass::Internal,
+                "room_state_malformed",
+                "room state root must be a JSON object",
+            )
+        })?;
+    let embodied = store
+        .embodied_spirit(configured_spirit)
+        .map_err(|error| Failure::new(FailureClass::Internal, "room_state_unreadable", error))?;
     root.entry("version").or_insert(json!(1));
-    root.entry("operator").or_insert_with(|| {
-        Value::String(room_marker_operator(room_dir, store.house_dir()))
-    });
+    root.entry("operator")
+        .or_insert_with(|| Value::String(room_marker_operator(room_dir, store.house_dir())));
     root.insert(
         "agentName".into(),
         Value::String(configured_spirit.to_owned()),
@@ -145,11 +162,15 @@ fn ensure_object_defaults<const N: usize>(
     root: &mut Map<String, Value>,
     key: &str,
     defaults: [(&str, Value); N],
-) -> Result<(), String> {
+) -> Result<(), Failure> {
     let value = root.entry(key).or_insert_with(|| Value::Object(Map::new()));
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| format!("room state {key} must be an object"))?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        Failure::new(
+            FailureClass::Internal,
+            "room_state_malformed",
+            format!("room state {key} must be an object"),
+        )
+    })?;
     for (name, value) in defaults {
         object.entry(name).or_insert(value);
     }
@@ -164,7 +185,7 @@ fn apply_patch(
     routing_mode_enabled: Option<bool>,
     model_default_enabled: Option<bool>,
     model_default_model: Option<Option<String>>,
-) -> Result<bool, String> {
+) -> Result<bool, Failure> {
     let mut changed = false;
     if let Some(operator) = operator {
         root.insert("operator".into(), Value::String(normalize_name(&operator)?));
@@ -185,7 +206,13 @@ fn apply_patch(
         let routing = root
             .get_mut("routingMode")
             .and_then(Value::as_object_mut)
-            .ok_or_else(|| "room state routingMode must be an object".to_owned())?;
+            .ok_or_else(|| {
+                Failure::new(
+                    FailureClass::Internal,
+                    "room_state_malformed",
+                    "room state routingMode must be an object",
+                )
+            })?;
         routing.insert("enabled".into(), Value::Bool(enabled));
         routing.insert("updatedAt".into(), Value::String(timestamp()));
         changed = true;
@@ -194,7 +221,13 @@ fn apply_patch(
         let model = root
             .get_mut("modelDefault")
             .and_then(Value::as_object_mut)
-            .ok_or_else(|| "room state modelDefault must be an object".to_owned())?;
+            .ok_or_else(|| {
+                Failure::new(
+                    FailureClass::Internal,
+                    "room_state_malformed",
+                    "room state modelDefault must be an object",
+                )
+            })?;
         if let Some(enabled) = model_default_enabled {
             model.insert("enabled".into(), Value::Bool(enabled));
         }
@@ -214,7 +247,7 @@ fn apply_prompt(
     root: &mut Map<String, Value>,
     configured_spirit: &str,
     prompt: &str,
-) -> Result<bool, String> {
+) -> Result<bool, Failure> {
     let operator = last_directive(prompt, &["Operator"]);
     let spirit = last_directive(prompt, &["EMBODY", "CONJURE", "SUMMON"]);
     let dismiss = has_directive(prompt, "DISMISS");
@@ -285,7 +318,7 @@ fn has_directive(prompt: &str, label: &str) -> bool {
     })
 }
 
-fn normalize_name(value: &str) -> Result<String, String> {
+fn normalize_name(value: &str) -> Result<String, Failure> {
     let value = value.trim();
     if value.is_empty()
         || value.encode_utf16().count() > 80
@@ -293,7 +326,11 @@ fn normalize_name(value: &str) -> Result<String, String> {
             .chars()
             .any(|character| matches!(character, '\r' | '\n' | '|'))
     {
-        return Err("room state display name is invalid".into());
+        return Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_display_name",
+            "room state display name is invalid",
+        ));
     }
     Ok(value.to_owned())
 }

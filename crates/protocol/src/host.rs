@@ -12,7 +12,7 @@ use summoning::presence::{
 };
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
-pub const HOST_API_VERSION: u32 = 2;
+pub const HOST_API_VERSION: u32 = 3;
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
 pub const PAPER_BOAT_RECEIPT_SUBSCRIBE: &str = "athanor.paper_boat_receipt.subscribe";
 pub const PAPER_BOAT_RECEIPT_SNAPSHOT: &str = "athanor.paper_boat_receipt.snapshot";

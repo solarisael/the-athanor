@@ -1,0 +1,16 @@
+{
+  "name": "@solarisael/athanor-house-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The House organs over MCP stdio, for any MCP harness.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
+  }
+}

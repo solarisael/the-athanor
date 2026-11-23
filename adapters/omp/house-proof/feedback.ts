@@ -183,8 +183,19 @@ function nextCheckRecords(values: unknown[], operation: string): JsonRecord[] {
   });
 }
 
-function canonicalError(payload: unknown, operation: string): JsonRecord {
+// Session tools and child-log pages refuse as `{ok: false, error: {code,
+// message, ...}}`. The nested object is lifted so its code, message and
+// fields (revision_conflict's currentRevision) reach the agent.
+function failureSource(payload: unknown): JsonRecord {
   const source = asRecord(payload);
+  const nested = source.error;
+  if (!nested || typeof nested !== "object" || Array.isArray(nested) || nested instanceof Error) return source;
+  const { error: _nested, ...rest } = source;
+  return { ...(nested as JsonRecord), ...rest };
+}
+
+function canonicalError(payload: unknown, operation: string): JsonRecord {
+  const source = failureSource(payload);
   const redactedDetails = redact(source.details);
   const sourceDetails = redactedDetails && typeof redactedDetails === "object" && !Array.isArray(redactedDetails)
     ? redactedDetails as JsonRecord

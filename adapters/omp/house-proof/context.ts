@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { HostUnavailable, hostCommand, sendHostCommand, type HostBinding } from "./host.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./constants.ts";
-import { compactionThresholdTokens } from "./boat-door.ts";
+import { compactionSettings, compactionThresholdTokens, type HarnessSettings } from "./boat-door.ts";
 
 export const CONTEXT_BLOCK_TYPES = {
   "room-context": "athanor-room-context",
@@ -63,8 +63,6 @@ export type ContextPrepareRequest = {
   priorPresence: { frameId: string; frameRendered: string } | null;
 };
 
-type HarnessSettings = { get(key: string): unknown } | undefined;
-
 /** The active model's context window and the token count where OMP starts compaction on it. */
 export function modelContextWindow(
   model: { contextWindow?: unknown } | undefined,
@@ -76,13 +74,10 @@ export function modelContextWindow(
 
   const contextWindowTokens = Math.round(window);
 
-  if (!settings?.get("compaction.enabled")) return { contextWindowTokens };
+  const compaction = compactionSettings(settings);
+  if (!compaction?.enabled) return { contextWindowTokens };
 
-  const threshold = compactionThresholdTokens(contextWindowTokens, {
-    thresholdTokens: settings.get("compaction.thresholdTokens") as number | undefined,
-    thresholdPercent: settings.get("compaction.thresholdPercent") as number | undefined,
-    reserveTokens: settings.get("compaction.reserveTokens") as number | undefined,
-  });
+  const threshold = compactionThresholdTokens(contextWindowTokens, compaction);
 
   if (threshold < 1) return { contextWindowTokens };
   return { contextWindowTokens, compactionThresholdTokens: threshold };

@@ -508,6 +508,38 @@ function layerDoorPage(lines: DoorLines, page: string): string | null {
 }
 
 type CompactionThresholdSettings = { thresholdTokens?: number; thresholdPercent?: number; reserveTokens?: number };
+type CompactionSettings = CompactionThresholdSettings & { enabled: boolean };
+export type HarnessSettings = { rawValue?: (setting: { segments: string[]; definition: object }) => unknown } | undefined;
+
+let unreadableSettingsWarned = false;
+
+/**
+ * OMP's compaction settings. OMP reads settings through registry handles it does
+ * not export to extensions; `Settings.rawValue` takes any handle-shaped key and
+ * returns the configured value across layers, or undefined when unset. Unset keeps
+ * OMP's defaults: compaction enabled, no threshold override. Settings OMP no longer
+ * lets us read degrade to undefined with one warning: the threshold is a hint, and
+ * losing it must not cost the turn its context.
+ */
+export function compactionSettings(settings: HarnessSettings): CompactionSettings | undefined {
+  if (!settings) return undefined;
+  if (typeof settings.rawValue !== "function") {
+    if (!unreadableSettingsWarned) console.warn("[athanor] OMP settings expose no rawValue; compaction threshold omitted");
+    unreadableSettingsWarned = true;
+    return undefined;
+  }
+  const read = (key: string) => settings.rawValue!({ segments: ["compaction", key], definition: {} });
+  const number = (key: string) => {
+    const value = read(key);
+    return typeof value === "number" ? value : undefined;
+  };
+  return {
+    enabled: read("enabled") !== false,
+    thresholdTokens: number("thresholdTokens"),
+    thresholdPercent: number("thresholdPercent"),
+    reserveTokens: number("reserveTokens"),
+  };
+}
 
 /** OMP's own compaction threshold. Mirrors resolveThresholdTokens in pi-agent-core, which OMP does not export to extensions. */
 export function compactionThresholdTokens(contextWindow: number, settings: CompactionThresholdSettings): number {

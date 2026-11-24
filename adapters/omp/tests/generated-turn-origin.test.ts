@@ -33,6 +33,11 @@ const ROOM_KEY = "origin-room";
 const ROOM = path.join(tmpdir(), "athanor-generated-turn-origin", ROOM_KEY);
 const PRESENCE = "athanor-presence-context";
 
+// OMP 19.1 Settings: no string get(key); rawValue(handle) reads one key across layers.
+function ompSettings(values: Record<string, unknown>) {
+  return { rawValue: (setting: { segments: string[] }) => values[setting.segments.join(".")] };
+}
+
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
 function registerAdapter(settings?: Record<string, unknown>): Map<string, Handler[]> {
@@ -50,7 +55,7 @@ function registerAdapter(settings?: Record<string, unknown>): Map<string, Handle
     registerMessageRenderer() {},
     registerCommand() {},
     registerTool() {},
-    ...(settings ? { pi: { settings: { get: (key: string) => settings[key] } } } : {}),
+    ...(settings ? { pi: { settings: ompSettings(settings) } } : {}),
   };
   solarisaelHouseProof(pi as any);
   return handlers;
@@ -671,14 +676,17 @@ test("context preparation sends the active model's window and OMP's compaction p
   expect(host.prepareRequests().at(-1)).toMatchObject({ contextWindowTokens: 1_000_000, compactionThresholdTokens: 800_000 });
 });
 
-test("an unknown model window sends nothing, and disabled compaction sends only the window", () => {
-  const enabled = { get: (key: string) => ({ "compaction.enabled": true } as Record<string, unknown>)[key] };
+test("an unknown model window sends nothing, and disabled or unreadable compaction sends only the window", () => {
+  const defaults = ompSettings({});
 
-  expect(modelContextWindow(undefined, enabled)).toEqual({});
-  expect(modelContextWindow({ contextWindow: 0 }, enabled)).toEqual({});
+  expect(modelContextWindow(undefined, defaults)).toEqual({});
+  expect(modelContextWindow({ contextWindow: 0 }, defaults)).toEqual({});
   expect(modelContextWindow({ contextWindow: 200_000 }, undefined)).toEqual({ contextWindowTokens: 200_000 });
-  // OMP's default reserve is 15% of the window.
-  expect(modelContextWindow({ contextWindow: 200_000 }, enabled)).toEqual({ contextWindowTokens: 200_000, compactionThresholdTokens: 170_000 });
+  expect(modelContextWindow({ contextWindow: 200_000 }, ompSettings({ "compaction.enabled": false }))).toEqual({ contextWindowTokens: 200_000 });
+  // Settings without rawValue (the pre-19.1 string-get shape) cost only the threshold, never the turn.
+  expect(modelContextWindow({ contextWindow: 200_000 }, { get: () => true } as any)).toEqual({ contextWindowTokens: 200_000 });
+  // Unset compaction stays enabled; OMP's default reserve is 15% of the window.
+  expect(modelContextWindow({ contextWindow: 200_000 }, defaults)).toEqual({ contextWindowTokens: 200_000, compactionThresholdTokens: 170_000 });
 });
 
 test("generated turns never send native-user directive authority", async () => {

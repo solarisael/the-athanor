@@ -59,6 +59,7 @@ the exact implementation record.
   uses its configured room.
 
 ### Added
+- `adapters/house-mcp` is a stdio MCP server for the House tools, so a harness other than OMP can use them. It registers the tool table of the OMP adapter, so the two lists cannot drift, and it leaves out 8 OMP-only tools by name. Its room comes from `ATHANOR_CLIENT_ROOM_DIR` or the launch directory, its session is `mcp-<uuid>` for each process, and its `instructions` carry the House `ORGANS.md`. Plan: `docs/HOUSE_MCP.md`.
 - `athanor move ROOM [--file NAME]... [--offline]` moves a room out of `roomsRoot` into `data/rooms/<room>`. It moves the marker, `.omp/runtime/`, `handoff-door.md`, each named file, and the Host state `data/state/host/<room>` as `host/`. The library stays in the vault. The marker gets `library`, and each `@` reference of the moved `AGENTS.md` to a vault file gets its absolute path. A failure undoes every change. A second run reports `unchanged`. The command refuses while the Host has a live session of the room.
 - Rooms in `data/rooms/<room>` read the House folder `<roomsRoot>/house`: the House page grants, the House door lines, and `@` references. Before, they looked for `data/rooms/house` and got no grants. The Host attach answer names the folder as `houseDir`. The Host also rebuilds a room when its room folder or state folder changes.
 - `substrate/test-ignored-db.sh` runs the database tests that have `#[ignore]` on a throwaway PostgreSQL server. CI does not run these tests. On 2026-11-21 the script ran 161 tests and all passed.

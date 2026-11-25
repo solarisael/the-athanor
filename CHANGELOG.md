@@ -71,6 +71,12 @@ the exact implementation record.
 - Schema 50 adds table `spirit_texts`. It holds the identity contract, the presence text, and the spirit text of each spirit, with every revision. The Host does not read this table yet. `substrate/import-spirit-texts.sh` copies text files into the table and proves each copy by SHA-256.
 
 ### Fixed
+- A backup after a paper boat or a memory no longer stops the Host. The `pg_dump`
+  ran on an async worker thread for about 35 s. During that time no room got an
+  answer, session leases expired, and Orihon capture reported "require an active
+  registered conversation". The dump now runs on a blocking thread. The write
+  still waits for the dump and reports its result. Two writes that ask at the
+  same time make one dump: the second write waits and reports `fresh`.
 - The automatic context budget is 12 s on every platform. Before this change,
   the Host kept 2 s off Windows and the adapter kept 8 s. The Host used the
   earlier deadline, so automatic Recall rarely completed on Linux.

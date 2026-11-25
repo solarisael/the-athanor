@@ -983,10 +983,15 @@ pub async fn run_post_write(
 }
 
 /// A post-write dump younger than this covers the write. Every room's sleep
-/// asks for a backup, and a full `pg_dump` pins PostgreSQL for tens of
-/// seconds while other rooms' turn-end work runs on a three-second budget;
-/// one dump per bound is enough.
+/// asks for a backup, and the write that asks waits tens of seconds for a
+/// full `pg_dump`; one dump per bound is enough.
 pub const POST_WRITE_FRESH_HOURS: u64 = 12;
+
+/// One post-write dump at a time. A write that waited here finds the dump of
+/// the write before it and answers `Fresh`.
+// enough: a lock inside this process; two Host processes that share one
+// backup folder need a lock file.
+static POST_WRITE_DUMP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// `Skipped` when the write did not ask; `Fresh` when a dump younger than
 /// [`POST_WRITE_FRESH_HOURS`] already exists; otherwise the backup's own answer.
@@ -996,14 +1001,16 @@ pub async fn post_write_outcome(
     room_keep: usize,
     requested: bool,
 ) -> hearth::BackupOutcome {
-    let fresh = requested
-        .then(|| default_backup_dir().ok())
-        .flatten()
+    if !requested {
+        return hearth::BackupOutcome::Skipped;
+    }
+
+    let _one_dump = POST_WRITE_DUMP.lock().await;
+    let fresh = default_backup_dir()
+        .ok()
         .and_then(|dir| fresh_dump_in(dir, POST_WRITE_FRESH_HOURS));
-    post_write_outcome_with(requested, fresh, || {
-        run_post_write(pool, database_url, room_keep)
-    })
-    .await
+
+    fresh_or_dump(fresh, || run_post_write(pool, database_url, room_keep)).await
 }
 
 /// The newest healthy dump in `directory` when it is younger than
@@ -1024,21 +1031,15 @@ pub fn fresh_dump_in(directory: PathBuf, bound_hours: u64) -> Option<FreshDump> 
     .ok()
 }
 
-async fn post_write_outcome_with<F, Fut>(
-    requested: bool,
-    fresh: Option<FreshDump>,
-    runner: F,
-) -> hearth::BackupOutcome
+async fn fresh_or_dump<F, Fut>(fresh: Option<FreshDump>, runner: F) -> hearth::BackupOutcome
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<BackupReceipt, BackupFailure>>,
 {
-    if !requested {
-        return hearth::BackupOutcome::Skipped;
-    }
     if let Some(fresh) = fresh {
         return hearth::BackupOutcome::Fresh(fresh);
     }
+
     match runner().await {
         Ok(receipt) => hearth::BackupOutcome::Ok(receipt),
         Err(failure) => hearth::BackupOutcome::Failed(failure),
@@ -1060,12 +1061,22 @@ async fn post_write_manifest(
         .await
         .map_err(|error| (error, None))?;
     let dir = default_backup_dir().map_err(|error| (error, None))?;
-    let tool = resolve_pg_tool("pg_dump")
-        .ok()
-        .map(|tool| tool.label().to_owned());
-    backup_with_migrations(database_url, &dir, keep, source)
-        .map(|manifest| (dir, manifest))
-        .map_err(|error| (error, tool))
+    let database_url = database_url.to_owned();
+
+    // `pg_dump` and the dump hash block for tens of seconds. On an async
+    // worker that stops the whole Host: heartbeats, NATS, and every room.
+    let dumped = tokio::task::spawn_blocking(move || {
+        let tool = resolve_pg_tool("pg_dump")
+            .ok()
+            .map(|tool| tool.label().to_owned());
+
+        backup_with_migrations(&database_url, &dir, keep, source)
+            .map(|manifest| (dir, manifest))
+            .map_err(|error| (error, tool))
+    })
+    .await;
+
+    dumped.unwrap_or_else(|stopped| Err((BackupError::Io(io::Error::other(stopped)), None)))
 }
 
 #[cfg(test)]
@@ -1084,23 +1095,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unrequested_backup_skips_runner() {
-        let outcome = post_write_outcome_with(
-            false,
-            None,
-            || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
-                panic!("an unrequested backup must not invoke the runner");
-            },
-        )
-        .await;
+    async fn unrequested_backup_never_waits_behind_a_running_dump() {
+        let _running_dump = POST_WRITE_DUMP.lock().await;
+        let pool = PgPool::connect_lazy("postgres://unused/unused").unwrap();
+
+        let outcome = post_write_outcome(&pool, "postgres://unused/unused", 1, false).await;
+
         assert!(matches!(outcome, hearth::BackupOutcome::Skipped));
     }
 
     #[tokio::test]
     async fn fresh_dump_answers_without_running() {
         let fresh = FreshDump::new("memory.dump".into(), 7_200, 12).unwrap();
-        let outcome = post_write_outcome_with(
-            true,
+        let outcome = fresh_or_dump(
             Some(fresh.clone()),
             || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
                 panic!("a fresh dump must not invoke the runner");
@@ -1115,7 +1122,7 @@ mod tests {
     #[tokio::test]
     async fn requested_backup_runs_once_and_returns_its_receipt() {
         let mut calls = 0;
-        let outcome = post_write_outcome_with(true, None, || {
+        let outcome = fresh_or_dump(None, || {
             calls += 1;
             std::future::ready(
                 BackupReceipt::new(

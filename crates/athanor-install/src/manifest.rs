@@ -108,7 +108,7 @@ impl ReleaseManifest {
         if self.schema_version != REQUIRED_SCHEMA {
             return Err(ManifestError::Schema(self.schema_version));
         }
-        let compatibility_ok = matches!(self.compatibility.host_api, 1 | 2)
+        let compatibility_ok = matches!(self.compatibility.host_api, 1..=3)
             && self.compatibility.substrate_api == 1
             && matches!(self.compatibility.delivery_api, 1 | NATS_AUTH_DELIVERY_API)
             && self.compatibility.postgresql == POSTGRESQL_VERSION
@@ -208,6 +208,8 @@ mod tests {
         manifest.compatibility.host_api = 2;
         assert_eq!(manifest.validate(), Ok(()));
         manifest.compatibility.host_api = 3;
+        assert_eq!(manifest.validate(), Ok(()));
+        manifest.compatibility.host_api = 4;
         assert!(matches!(
             manifest.validate(),
             Err(ManifestError::Compatibility(_))

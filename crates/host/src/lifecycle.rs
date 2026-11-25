@@ -1,5 +1,5 @@
 use hearth::machines::knock_turn::{KnockTurnFacts, plan_knock_turn};
-use protocol::{ChatAuthor, ChatMessage};
+use protocol::{ChatAuthor, ChatMessage, Failure, FailureClass};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -63,7 +63,7 @@ enum ObservationKind {
 pub(crate) fn execute(
     request: LifecycleRequest,
     messages: &[ChatMessage],
-) -> Result<Value, String> {
+) -> Result<Value, Failure> {
     match request {
         LifecycleRequest::ChatNext { .. } => {
             // # enough: the ring caps this scan at 256 rows; index answered turns if that bound grows.
@@ -119,7 +119,11 @@ pub(crate) fn execute(
                 || context_window <= 0.0
                 || !compaction_threshold.is_finite()
             {
-                return Err("boat threshold requires finite harness token limits".into());
+                return Err(Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_token_limits",
+                    "boat threshold requires finite harness token limits",
+                ));
             }
             Ok(json!({ "tokens": compaction_threshold - (context_window * 0.1).floor() }))
         }

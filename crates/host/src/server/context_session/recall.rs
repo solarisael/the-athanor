@@ -20,7 +20,8 @@ pub(super) async fn analysis(
         &state.config.room_dir,
         &state.config.spirit,
         crate::room_state::RoomStateRequest::Read,
-    )?;
+    )
+    .map_err(|failure| failure.message)?;
     let input = hearth::context::ContextAnalysisRequest {
         prompt: request.prompt.clone(),
         recognized_entities,
@@ -308,11 +309,11 @@ pub(super) async fn retrieve(
     )
     .await
     .unwrap_or_else(|_| {
-        Err(protocol::ProtocolErrorBody::application(
+        Err(protocol::Failure::new(
+            protocol::FailureClass::BudgetExhausted,
             "automatic_recall_budget_exhausted",
             "automatic Recall exhausted its budget share",
-        )
-        .build())
+        ))
     });
     let mut raw = match recalled {
         Ok(raw) => raw,
@@ -349,7 +350,7 @@ pub(super) async fn retrieve(
                 json!(failure),
             )
             .await?;
-            let native_failure = json!({"error":error.message,"code":error.code,"retryable":error.retryable,"details":error.details});
+            let native_failure = json!({"error":error.message,"code":error.code,"retryable":error.retryable(),"details":error.details});
             let diagnostic = telemetry::diagnostic(
                 &native_failure,
                 request,

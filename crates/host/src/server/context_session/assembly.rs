@@ -41,7 +41,8 @@ pub(super) async fn assemble(
         &state.config.room_dir,
         &state.config.spirit,
         crate::room_state::RoomStateRequest::Read,
-    )?;
+    )
+    .map_err(|failure| failure.message)?;
     let mut lesson_mode = text(&room["recallPolicy"]["resolvedMode"]).to_owned();
     let mut evaluation = None;
     if request.capabilities.automatic_recall {

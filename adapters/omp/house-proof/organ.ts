@@ -1,4 +1,7 @@
-import { hostCommand, HostRefused, HostUnavailable, sendHostCommand, type HostBinding } from "./host.ts";
+import {
+  decodeHostFailure, failureDetails, failureRetryable, hostCommand, HostRefused, HostUnavailable, sendHostCommand,
+  type HostBinding,
+} from "./host.ts";
 
 export type OrganOperation =
   | "canon_write" | "canon_read" | "remember" | "paper_boat_sleep" | "paper_boat_wake"
@@ -65,11 +68,9 @@ export async function requestOrgan(
     }
     throw error;
   }
-  if (response.error && typeof response.error === "object") {
-    const error = response.error as Record<string, unknown>;
-    if (typeof error.code === "string" && typeof error.message === "string" && typeof error.retryable === "boolean") {
-      throw new OrganError(error.message, error.code, error.retryable, error.details);
-    }
+  if (response.failure !== undefined) {
+    const failure = decodeHostFailure(response.failure);
+    if (failure) throw new OrganError(failure.message, failure.code, failureRetryable(failure), failureDetails(failure));
   } else if (response.result && typeof response.result === "object" && !Array.isArray(response.result)) {
     return response.result as Record<string, unknown>;
   }

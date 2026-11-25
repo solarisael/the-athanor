@@ -481,7 +481,11 @@ fn meta(session: &str) -> protocol::CommandMeta {
     }
 }
 
-async fn organ(config: &crate::HostConfig, session: &str, params: Value) -> Result<Value, String> {
+async fn organ(
+    config: &crate::HostConfig,
+    session: &str,
+    params: Value,
+) -> Result<Value, protocol::Failure> {
     let giga = tokio::sync::Mutex::new(crate::organ::GigaRoomWorker::default());
     let request = protocol::organ::OrganRequest {
         operation: protocol::organ::OrganOperation::WorkerLifecycle,
@@ -489,10 +493,7 @@ async fn organ(config: &crate::HostConfig, session: &str, params: Value) -> Resu
         target_scope: protocol::organ::OrganTargetScope::Room,
     };
     let live = crate::organ::orihon::live::Room::default();
-    match crate::organ::call(config, None, &meta(session), request, &giga, &live).await {
-        protocol::ResponsePayload::Result { result } => Ok(result),
-        protocol::ResponsePayload::Error { error } => Err(error.code),
-    }
+    crate::organ::call(config, None, &meta(session), request, &giga, &live).await
 }
 
 // Kills: callers naming their own identity, the Host binding the wrong session
@@ -508,7 +509,9 @@ async fn host_injects_identity_and_selects_exactly_one_store() {
         json!({"action": "inspect", "requestId": "i", "session": "child"}),
     )
     .await;
-    assert_eq!(spoof.unwrap_err(), "invalid_params");
+    let spoof = spoof.unwrap_err();
+    assert_eq!(spoof.code, "invalid_params");
+    assert_eq!(spoof.class, protocol::FailureClass::InputRefused);
 
     let mut prepare = prepare('a');
     prepare["requestId"] = json!("prep");
@@ -516,10 +519,9 @@ async fn host_injects_identity_and_selects_exactly_one_store() {
     let mut opening = open('a');
     opening["requestId"] = json!("open");
     organ(&config, "child", opening.clone()).await.unwrap();
-    assert_eq!(
-        organ(&config, "thief", opening).await.unwrap_err(),
-        "reservation_claimed"
-    );
+    let thief = organ(&config, "thief", opening).await.unwrap_err();
+    assert_eq!(thief.code, "reservation_claimed");
+    assert_eq!(thief.class, protocol::FailureClass::Conflict);
     let book = prepared["bookId"].as_str().unwrap();
     let parent_note = organ(
         &config,
@@ -527,7 +529,9 @@ async fn host_injects_identity_and_selects_exactly_one_store() {
         json!({"action": "append", "requestId": "n", "bookId": book, "kind": "note", "body": "x"}),
     )
     .await;
-    assert_eq!(parent_note.unwrap_err(), "kind_not_allowed");
+    let parent_note = parent_note.unwrap_err();
+    assert_eq!(parent_note.code, "kind_not_allowed");
+    assert_eq!(parent_note.class, protocol::FailureClass::InputRefused);
     let journal = super::journal_path(&config);
     assert!(journal.starts_with(&config.state_dir));
     let written = std::fs::metadata(&journal).unwrap().len();

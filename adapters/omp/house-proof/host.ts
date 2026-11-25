@@ -28,39 +28,93 @@ export class HostUnavailable extends Error {
   }
 }
 
-// The Host answered and said no. Every caller that treats absence as
-// degradation keeps doing so; only a retry loop needs the distinction, because
-// asking again does not change a refusal. The Host's own code, retryable flag
-// and details travel with it; a bare `reason` refusal is `host_refused`.
-export class HostRefused extends HostUnavailable {
-  retryable: boolean;
-  details: Record<string, unknown> | undefined;
-  constructor(
-    message: string,
-    { code = "host_refused", retryable = false, details }: { code?: string; retryable?: boolean; details?: Record<string, unknown> } = {},
-  ) {
-    super(message);
-    this.name = "HostRefused";
-    this.code = code;
-    this.retryable = retryable;
-    this.details = details;
-  }
-}
+// The closed list of failure classes (#3). The class decides the reaction;
+// `code` keeps the exact word a caller acts on.
+export const FAILURE_CLASSES = [
+  "input_refused", "not_permitted", "conflict", "outcome_unknown", "no_connection", "provider_busy",
+  "provider_down", "deadline", "budget_exhausted", "invalid_response", "configuration", "internal",
+] as const;
+export type FailureClass = typeof FAILURE_CLASSES[number];
+export type FailureHop = { layer: string; file: string; line: number; op: string; observed?: string };
+export type HostFailure = {
+  class: FailureClass;
+  code: string;
+  message: string;
+  hops: FailureHop[];
+  details?: Record<string, unknown>;
+};
+
+const CLASS_SET = new Set<string>(FAILURE_CLASSES);
+const RETRYABLE_CLASSES = new Set<FailureClass>(["no_connection", "provider_busy", "provider_down"]);
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-// command_failed carries `error: {code, message, retryable, details?}`
-// (crates/host/src/server/native_commands.rs result_response); command_refused
-// carries only `reason`.
+function hop(value: unknown): FailureHop | null {
+  const source = record(value);
+  if (!source || typeof source.layer !== "string" || typeof source.file !== "string"
+    || !Number.isSafeInteger(source.line) || typeof source.op !== "string") return null;
+  return {
+    layer: source.layer, file: source.file, line: source.line as number, op: source.op,
+    ...(typeof source.observed === "string" ? { observed: source.observed } : {}),
+  };
+}
+
+// The one decoder for a Host `failure` body (protocol::Failure). Every Host
+// answer that failed reaches the adapter through it; null means the body is
+// not a failure the adapter can read.
+export function decodeHostFailure(value: unknown): HostFailure | null {
+  const source = record(value);
+  if (!source || !CLASS_SET.has(source.class as string) || typeof source.code !== "string"
+    || typeof source.message !== "string") return null;
+  const hops = Array.isArray(source.hops) ? source.hops.map(hop) : [];
+  if (hops.some((entry) => entry === null)) return null;
+  const details = source.details === undefined ? undefined : record(source.details);
+  if (details === null) return null;
+  return {
+    class: source.class as FailureClass, code: source.code, message: source.message, hops: hops as FailureHop[],
+    ...(details ? { details } : {}),
+  };
+}
+
+export function failureRetryable(failure: HostFailure): boolean {
+  return RETRYABLE_CLASSES.has(failure.class);
+}
+
+// The details a tool result shows: the Host's own details plus the class and
+// the hops, which canonicalError passes through.
+export function failureDetails(failure: HostFailure): Record<string, unknown> {
+  return { ...failure.details, class: failure.class, hops: failure.hops };
+}
+
+// The Host answered and said no. Every caller that treats absence as
+// degradation keeps doing so; only a retry loop needs the distinction, because
+// asking again does not change a refusal.
+export class HostRefused extends HostUnavailable {
+  readonly failure: HostFailure;
+  retryable: boolean;
+  details: Record<string, unknown>;
+  constructor(failure: HostFailure) {
+    super(failure.message);
+    this.name = "HostRefused";
+    this.failure = failure;
+    this.code = failure.code;
+    this.retryable = failureRetryable(failure);
+    this.details = failureDetails(failure);
+  }
+}
+
 function hostRefusal(response: HostResponse): HostRefused {
-  const failure = record(response.error) ?? {};
-  const details = failure.details === undefined ? undefined : record(failure.details) ?? { upstream_details: failure.details };
-  return new HostRefused(text(failure.message) || text(response.reason) || "Athanor Host rejected the command", {
-    code: text(failure.code) || "host_refused",
-    retryable: failure.retryable === true,
-    details,
+  const failure = decodeHostFailure(response.failure);
+  if (failure) return new HostRefused(failure);
+  // A Host from before slice A1 sends `reason`; the adapter and Host releases disagree.
+  const legacy = text(response.reason);
+  return new HostRefused({
+    class: "invalid_response",
+    code: "failure_unreadable",
+    message: `${text(response.command_or_event_type)} carried no readable failure${legacy ? `: ${legacy}` : ""}`,
+    hops: [],
   });
 }
 

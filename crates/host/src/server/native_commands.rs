@@ -1,11 +1,19 @@
 use super::*;
-use protocol::{JUDGMENT_RESULT, LIFECYCLE_RESULT, ORGAN_RESULT, ROOM_STATE_RESULT};
+use protocol::{
+    Failure, FailureClass, JUDGMENT_RESULT, LIFECYCLE_RESULT, ORGAN_RESULT, ROOM_STATE_RESULT,
+};
 
 pub(super) async fn room(state: &AppState, meta: CommandMeta, request: Value) -> Responses {
     let result = {
         let _runtime = state.runtime.lock().await;
         serde_json::from_value(request)
-            .map_err(|error| format!("invalid room request: {error}"))
+            .map_err(|error| {
+                Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_room_request",
+                    format!("invalid room request: {error}"),
+                )
+            })
             .and_then(|request| {
                 crate::room_state::execute(
                     &state.room_store,
@@ -29,7 +37,11 @@ pub(super) async fn judgment(state: &AppState, meta: CommandMeta, request: Value
             )
             .await
         }
-        Err(_) => Err("invalid judgment request".into()),
+        Err(_) => Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_judgment_request",
+            "invalid judgment request",
+        )),
     };
     result_response(state, meta, JUDGMENT_RESULT, result).await
 }
@@ -58,7 +70,11 @@ pub(super) async fn lifecycle(state: &AppState, meta: CommandMeta, request: Valu
             };
             crate::lifecycle::execute(request, &messages)
         }
-        Err(error) => Err(format!("invalid lifecycle request: {error}")),
+        Err(error) => Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_lifecycle_request",
+            format!("invalid lifecycle request: {error}"),
+        )),
     };
     result_response(state, meta, LIFECYCLE_RESULT, result).await
 }
@@ -86,23 +102,16 @@ pub(super) async fn organ(
             .live_conversations()
             .contains(&meta.sender_session)
     {
-        let payload = protocol::ResponsePayload::<Value>::Error {
-            error: protocol::ProtocolError::InvalidParams(
-                "Orihon mode, capture and live turns require an active registered conversation"
-                    .into(),
-            )
-            .into(),
-        };
-        return response(
-            state,
-            &meta,
-            ORGAN_RESULT,
-            serde_json::to_value(payload).expect("native payload serializes"),
-        )
-        .await;
+        // The old code word stays; the session's registration, not the call, is what failed.
+        let failure = Failure::new(
+            FailureClass::Conflict,
+            "invalid_params",
+            "invalid parameters: Orihon mode, capture and live turns require an active registered conversation",
+        );
+        return response(state, &meta, ORGAN_RESULT, json!({ "failure": failure })).await;
     }
 
-    let payload = crate::organ::call(
+    let payload = match crate::organ::call(
         &state.config,
         state.hallway_pool.as_ref(),
         &meta,
@@ -110,31 +119,25 @@ pub(super) async fn organ(
         &state.giga,
         &state.orihon,
     )
-    .await;
-
-    response(
-        state,
-        &meta,
-        ORGAN_RESULT,
-        serde_json::to_value(payload).expect("native payload serializes"),
-    )
     .await
+    {
+        Ok(result) => json!({ "result": result }),
+        Err(failure) => json!({ "failure": failure }),
+    };
+    response(state, &meta, ORGAN_RESULT, payload).await
 }
 
 async fn result_response(
     state: &AppState,
     meta: CommandMeta,
     kind: &str,
-    result: Result<Value, String>,
+    result: Result<Value, Failure>,
 ) -> Responses {
     match result {
         Ok(result) => response(state, &meta, kind, json!({ "result": result })).await,
-        Err(reason) => {
-            let failure = format!("athanor.{}.command_failed", meta.projection_id);
-            response(state, &meta, &failure, json!({
-                "reason": reason,
-                "error": { "code": "native_request_failed", "message": reason, "retryable": false }
-            })).await
+        Err(failure) => {
+            let failed = format!("athanor.{}.command_failed", meta.projection_id);
+            response(state, &meta, &failed, json!({ "failure": failure })).await
         }
     }
 }

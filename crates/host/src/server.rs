@@ -11,7 +11,7 @@ use crate::config::{HOST_RECIPIENT, HostConfig};
 use crate::insula::InsulaHost;
 use crate::panel::PanelHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
-use crate::presence::{PresenceRuntime, host_capabilities};
+use crate::presence::{PresenceRuntime, PresenceRuntimeError, host_capabilities};
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
 use crate::routing::{
     DispatchRequest, StoredPage, familiar_status, house_dispatch, lane_status, load_spellbook,
@@ -56,19 +56,20 @@ use protocol::{
     CHAT_DELTA, CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED,
     CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatDraft, ChatEvent, ChatMessage, ClientCommand,
     CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent,
-    ConversationLogRequest, DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED,
-    HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED,
-    HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
-    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
-    LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
-    PAPER_BOAT_RECEIPT_SUBSCRIBE, PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED,
-    PRESENCE_OPENED, PRESENCE_PROJECTION_ID, PRESENCE_SETTLED, PaperBoatReceiptEvent,
-    PaperBoatReceiptState, PresenceResultEvent, RECALL_POLICY_COMMAND_ACCEPTED,
-    RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
-    RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
-    ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallParams, RecallPolicyDecision,
-    RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
-    ShellResultEvent, SnapshotEvent, parse_client_command,
+    ConversationLogRequest, DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, Failure, FailureClass,
+    HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED,
+    HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID,
+    HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent, HallwayKnockClaimedEvent,
+    HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
+    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
+    PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED, PRESENCE_OPENED,
+    PRESENCE_PROJECTION_ID, PRESENCE_SETTLED, PaperBoatReceiptEvent, PaperBoatReceiptState,
+    PresenceResultEvent, RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED,
+    RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID,
+    RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT,
+    RecallParams, RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState,
+    RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent, SnapshotEvent,
+    parse_client_command,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -472,7 +473,12 @@ async fn handle_socket_inner(
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let text = diagnostic_refusal(&state, "projection delta stream lagged; resync required").await;
+                        let lagged = Failure::new(
+                            FailureClass::Conflict,
+                            "delta_stream_lagged",
+                            "projection delta stream lagged; resync required",
+                        );
+                        let text = diagnostic_refusal(&state, lagged).await;
                         let _ = sink.send(Message::Text(text.into())).await;
                         return;
                     }
@@ -498,7 +504,12 @@ async fn handle_socket_inner(
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let text = diagnostic_refusal(&state, "chat delta stream lagged; resubscribe required").await;
+                        let lagged = Failure::new(
+                            FailureClass::Conflict,
+                            "delta_stream_lagged",
+                            "chat delta stream lagged; resubscribe required",
+                        );
+                        let text = diagnostic_refusal(&state, lagged).await;
                         let _ = sink.send(Message::Text(text.into())).await;
                         return;
                     }
@@ -563,7 +574,12 @@ async fn handle_socket_inner(
                     }
                     Ok(Message::Pong(_)) => {}
                     Ok(Message::Binary(_)) => {
-                        let text = diagnostic_refusal(&state, "binary WebSocket messages are not accepted").await;
+                        let binary = Failure::new(
+                            FailureClass::InputRefused,
+                            "binary_message_unsupported",
+                            "binary WebSocket messages are not accepted",
+                        );
+                        let text = diagnostic_refusal(&state, binary).await;
                         if sink.send(Message::Text(text.into())).await.is_err() { return; }
                     }
                     Err(_) => return,
@@ -616,19 +632,23 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
     let raw: Value = match serde_json::from_str(text) {
         Ok(value) => value,
         Err(error) => {
+            let failure = Failure::new(
+                FailureClass::InputRefused,
+                "malformed_command",
+                format!("malformed JSON command: {error}"),
+            );
             return Responses {
-                direct: vec![
-                    diagnostic_refusal(state, &format!("malformed JSON command: {error}")).await,
-                ],
+                direct: vec![diagnostic_refusal(state, failure).await],
                 delta: None,
             };
         }
     };
     let command_hash = match semantic_command_hash(&raw) {
         Ok(hash) => hash,
-        Err(reason) => {
+        Err(message) => {
+            let failure = Failure::new(FailureClass::InputRefused, "malformed_command", message);
             return Responses {
-                direct: vec![diagnostic_refusal(state, &reason).await],
+                direct: vec![diagnostic_refusal(state, failure).await],
                 delta: None,
             };
         }
@@ -641,7 +661,11 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 &error.message_id,
                 &error.idempotency_key,
                 RECALL_POLICY_COMMAND_REFUSED,
-                Some(error.reason),
+                Some(Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_command",
+                    error.reason,
+                )),
             )
             .await;
             return Responses {
@@ -650,12 +674,12 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             };
         }
     };
-    if let Err(reason) = validate_command(state, &command) {
+    if let Err(failure) = validate_command(state, &command) {
         let event = outcome(
             state,
             command.meta(),
             RECALL_POLICY_COMMAND_REFUSED,
-            Some(reason),
+            Some(failure),
         )
         .await;
         return Responses {
@@ -707,7 +731,11 @@ async fn execute_service_command(
                 state,
                 &meta,
                 RECALL_POLICY_COMMAND_REFUSED,
-                Some("context cannot recursively invoke context orchestration".into()),
+                Some(Failure::new(
+                    FailureClass::InputRefused,
+                    "recursive_context_command",
+                    "context cannot recursively invoke context orchestration",
+                )),
             )
             .await;
             Responses {
@@ -725,12 +753,12 @@ async fn execute_service_command(
         }
         ClientCommand::Subscribe { meta } | ClientCommand::Resync { meta } => {
             let mut runtime = state.runtime.lock().await;
-            if let Err(reason) = refresh_from_room_state(state, &mut runtime) {
+            if let Err(failure) = refresh_from_room_state(state, &mut runtime) {
                 let failed = outcome_with_runtime(
                     state,
                     &meta,
                     RECALL_POLICY_COMMAND_FAILED,
-                    Some(reason),
+                    Some(failure),
                     &runtime,
                     None,
                 );
@@ -751,20 +779,24 @@ async fn execute_service_command(
             sequence,
         } => {
             let runtime = state.runtime.lock().await;
-            let (kind, reason) = if version == runtime.cursor.version
+            let (kind, failure) = if version == runtime.cursor.version
                 && sequence == runtime.cursor.sequence
             {
                 (RECALL_POLICY_COMMAND_ACCEPTED, None)
             } else {
                 (
                     RECALL_POLICY_COMMAND_REFUSED,
-                    Some(format!(
-                        "stale acknowledgement version/sequence {version}/{sequence}; current is {}/{}",
-                        runtime.cursor.version, runtime.cursor.sequence
+                    Some(Failure::new(
+                        FailureClass::Conflict,
+                        "stale_acknowledgement",
+                        format!(
+                            "stale acknowledgement version/sequence {version}/{sequence}; current is {}/{}",
+                            runtime.cursor.version, runtime.cursor.sequence
+                        ),
                     )),
                 )
             };
-            let event = outcome_with_runtime(state, &meta, kind, reason, &runtime, None);
+            let event = outcome_with_runtime(state, &meta, kind, failure, &runtime, None);
             Responses {
                 direct: vec![serialize(&event)],
                 delta: None,
@@ -787,12 +819,16 @@ async fn execute_service_command(
                 .finish_pending(&state.room_store)
                 .and_then(|()| runtime.durable.save_sessions(&sessions));
 
-            if let Err(reason) = saved {
+            if let Err(message) = saved {
                 let failed = outcome_with_runtime(
                     state,
                     &meta,
                     RECALL_POLICY_COMMAND_FAILED,
-                    Some(reason),
+                    Some(Failure::new(
+                        FailureClass::Configuration,
+                        "policy_store_failed",
+                        message,
+                    )),
                     &runtime,
                     None,
                 );
@@ -881,14 +917,18 @@ async fn execute_service_command(
             if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
                 return response;
             }
-            if let Err(reason) =
+            if let Err(message) =
                 context_session::invalidate(state, &meta.sender_session, &mut context)
             {
                 let event = outcome_with_runtime(
                     state,
                     &meta,
                     RECALL_POLICY_COMMAND_FAILED,
-                    Some(reason),
+                    Some(Failure::new(
+                        FailureClass::Configuration,
+                        "context_cache_failed",
+                        message,
+                    )),
                     &runtime,
                     None,
                 );
@@ -933,7 +973,11 @@ async fn execute_service_command(
                         state,
                         &meta,
                         RECALL_POLICY_COMMAND_FAILED,
-                        Some(error.to_string()),
+                        Some(Failure::new(
+                            FailureClass::InputRefused,
+                            "invalid_context_request",
+                            error.to_string(),
+                        )),
                         &runtime,
                         None,
                     );
@@ -1116,7 +1160,11 @@ async fn execute_service_command(
             drop(runtime);
             let appended = match appended {
                 Ok(message) => message,
-                Err(reason) => return chat_refusal(state, &meta, &reason).await,
+                Err(error) => {
+                    let failure =
+                        Failure::new(FailureClass::Configuration, "chat_write_failed", error);
+                    return chat_refusal(state, &meta, failure).await;
+                }
             };
             chat_appended(state, &meta, appended, sequence).await
         }
@@ -1139,7 +1187,11 @@ async fn execute_service_command(
             drop(runtime);
             let appended = match appended {
                 Ok(message) => message,
-                Err(reason) => return chat_refusal(state, &meta, &reason).await,
+                Err(error) => {
+                    let failure =
+                        Failure::new(FailureClass::Configuration, "chat_write_failed", error);
+                    return chat_refusal(state, &meta, failure).await;
+                }
             };
             chat_appended(state, &meta, appended, sequence).await
         }
@@ -1161,7 +1213,11 @@ async fn execute_service_command(
             drop(runtime);
             let draft = match draft {
                 Ok(draft) => draft,
-                Err(reason) => return chat_refusal(state, &meta, &reason).await,
+                Err(error) => {
+                    let failure =
+                        Failure::new(FailureClass::Configuration, "chat_write_failed", error);
+                    return chat_refusal(state, &meta, failure).await;
+                }
             };
             // A late draft for a settled turn changes nothing and is still
             // accepted: the adapter's report was honest when it left.
@@ -1189,13 +1245,20 @@ async fn chat_identity(
     claimed_room: &str,
 ) -> Result<RoomIdentity, Box<Responses>> {
     if claimed_room != state.config.room {
-        return Err(Box::new(
-            chat_refusal(state, meta, "chat command names a foreign room").await,
-        ));
+        let failure = Failure::new(
+            FailureClass::NotPermitted,
+            "foreign_room",
+            "chat command names a foreign room",
+        );
+        return Err(Box::new(chat_refusal(state, meta, failure).await));
     }
     match state.room_store.identity(&state.config.spirit) {
         Ok(identity) => Ok(identity),
-        Err(reason) => Err(Box::new(chat_refusal(state, meta, &reason).await)),
+        Err(error) => {
+            let failure =
+                Failure::new(FailureClass::Configuration, "room_state_unavailable", error);
+            Err(Box::new(chat_refusal(state, meta, failure).await))
+        }
     }
 }
 
@@ -1223,7 +1286,7 @@ async fn chat_appended(
             outcome_hash,
             new_id(),
         ),
-        reason: None,
+        failure: None,
         version: 0,
         state: None,
         decision: None,
@@ -1234,9 +1297,9 @@ async fn chat_appended(
     }
 }
 
-async fn chat_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Responses {
+async fn chat_refusal(state: &AppState, meta: &CommandMeta, failure: Failure) -> Responses {
     let runtime = state.runtime.lock().await;
-    let reason_hash = body_hash(&json!({ "reason": reason })).expect("chat refusal hashes");
+    let failure_hash = body_hash(&json!({ "failure": &failure })).expect("chat refusal hashes");
     let event = CommandOutcomeEvent {
         meta: event_meta_for_projection(
             state,
@@ -1246,10 +1309,10 @@ async fn chat_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Res
             CHAT_COMMAND_REFUSED,
             CHAT_PROJECTION_ID,
             runtime.cursor.sequence,
-            reason_hash,
+            failure_hash,
             new_id(),
         ),
-        reason: Some(reason.to_owned()),
+        failure: Some(failure),
         version: 0,
         state: None,
         decision: None,
@@ -1382,14 +1445,14 @@ async fn open_presence_frame(
     let mut runtime = state.runtime.lock().await;
     let authentication = match authenticate_presence(state, &meta) {
         Ok(authentication) => authentication,
-        Err(reason) => {
+        Err(failure) => {
             presence_point(
                 state,
                 "presence_open",
                 OutcomeClass::Refused,
                 Some("not_authenticated"),
             );
-            return presence_refusal_sync(state, &meta, reason, runtime.cursor.sequence);
+            return presence_refusal_sync(state, &meta, failure, runtime.cursor.sequence);
         }
     };
     let carried = match adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
@@ -1401,12 +1464,12 @@ async fn open_presence_frame(
                 OutcomeClass::Error,
                 Some("store_read"),
             );
-            return presence_refusal_sync(
-                state,
-                &meta,
+            let failure = akasha_failure(
+                &error,
+                "presence_session_load",
                 format!("Presence store read failed: {error}"),
-                runtime.cursor.sequence,
             );
+            return presence_refusal_sync(state, &meta, failure, runtime.cursor.sequence);
         }
     };
     let binding = authentication.binding.clone();
@@ -1444,18 +1507,33 @@ async fn open_presence_frame(
 fn authenticate_presence(
     state: &AppState,
     meta: &CommandMeta,
-) -> Result<PresenceAuthentication, String> {
-    let identity: RoomIdentity = state.room_store.identity(&state.config.spirit)?;
+) -> Result<PresenceAuthentication, Failure> {
+    let identity: RoomIdentity =
+        state
+            .room_store
+            .identity(&state.config.spirit)
+            .map_err(|message| {
+                Failure::new(
+                    FailureClass::Configuration,
+                    "room_state_unavailable",
+                    message,
+                )
+            })?;
     if identity.room != meta.sender_room {
-        return Err(format!(
-            "Presence sender room {} is not this room",
-            meta.sender_room
+        return Err(Failure::new(
+            FailureClass::NotPermitted,
+            "foreign_room",
+            format!("Presence sender room {} is not this room", meta.sender_room),
         ));
     }
     if identity.spirit != meta.sender_spirit {
-        return Err(format!(
-            "Presence sender spirit {} is not the embodied spirit {}",
-            meta.sender_spirit, identity.spirit
+        return Err(Failure::new(
+            FailureClass::NotPermitted,
+            "foreign_spirit",
+            format!(
+                "Presence sender spirit {} is not the embodied spirit {}",
+                meta.sender_spirit, identity.spirit
+            ),
         ));
     }
     Ok(PresenceAuthentication {
@@ -1476,14 +1554,18 @@ fn presence_binding_for_live_frame(
     state: &AppState,
     meta: &CommandMeta,
     runtime: &RuntimeState,
-) -> Result<PresenceBinding, String> {
+) -> Result<PresenceBinding, Failure> {
     let binding = authenticate_presence(state, meta)?.binding;
     if runtime
         .presence
         .session_state(&meta.sender_session)
         .is_some_and(|(frame, _)| frame.binding != binding)
     {
-        return Err("Presence frame identity is stale; close it before opening anew".into());
+        return Err(Failure::new(
+            FailureClass::Conflict,
+            "presence_frame_stale",
+            "Presence frame identity is stale; close it before opening anew",
+        ));
     }
     Ok(binding)
 }
@@ -1501,16 +1583,18 @@ async fn compile_presence_turn(
             OutcomeClass::Error,
             Some("store_read"),
         );
-        return presence_refusal_sync(
-            state,
-            &meta,
+        let failure = akasha_failure(
+            &error,
+            "presence_session_load",
             format!("Presence store read failed: {error}"),
-            runtime.cursor.sequence,
         );
+        return presence_refusal_sync(state, &meta, failure, runtime.cursor.sequence);
     }
     let binding = match presence_binding_for_live_frame(state, &meta, &runtime) {
         Ok(binding) => binding,
-        Err(reason) => return presence_refusal_sync(state, &meta, reason, runtime.cursor.sequence),
+        Err(failure) => {
+            return presence_refusal_sync(state, &meta, failure, runtime.cursor.sequence);
+        }
     };
     let result = runtime
         .presence
@@ -1542,7 +1626,9 @@ async fn settle_presence_turn(
     let mut runtime = state.runtime.lock().await;
     let binding = match presence_binding_for_live_frame(state, &meta, &runtime) {
         Ok(binding) => binding,
-        Err(reason) => return presence_refusal_sync(state, &meta, reason, runtime.cursor.sequence),
+        Err(failure) => {
+            return presence_refusal_sync(state, &meta, failure, runtime.cursor.sequence);
+        }
     };
     let result = runtime
         .presence
@@ -1579,12 +1665,12 @@ async fn close_presence_frame(
             OutcomeClass::Error,
             Some("store_read"),
         );
-        return presence_refusal_sync(
-            state,
-            &meta,
+        let failure = akasha_failure(
+            &error,
+            "presence_session_load",
             format!("Presence store read failed: {error}"),
-            runtime.cursor.sequence,
         );
+        return presence_refusal_sync(state, &meta, failure, runtime.cursor.sequence);
     }
     // The ledger leaves memory with the session; read it before the close.
     let ledger = runtime
@@ -1626,7 +1712,7 @@ fn presence_response(
     state: &AppState,
     meta: &CommandMeta,
     event_type: &str,
-    result: Result<PresenceResult, impl ToString>,
+    result: Result<PresenceResult, PresenceRuntimeError>,
     sequence: u64,
 ) -> Responses {
     match result {
@@ -1651,17 +1737,40 @@ fn presence_response(
                 delta: None,
             }
         }
-        Err(error) => presence_refusal_sync(state, meta, error.to_string(), sequence),
+        Err(error) => {
+            let message = error.to_string();
+            let failure = match error {
+                PresenceRuntimeError::MissingFrame => {
+                    Failure::new(FailureClass::Conflict, "presence_frame_missing", message)
+                }
+                PresenceRuntimeError::ReplayOperationConflict { .. }
+                | PresenceRuntimeError::ReplayBodyConflict { .. } => {
+                    Failure::new(FailureClass::Conflict, "idempotency_key_reused", message)
+                }
+                PresenceRuntimeError::InactiveContract(_) => Failure::new(
+                    FailureClass::Conflict,
+                    "presence_contract_inactive",
+                    message,
+                ),
+                // Domain carries summoning's request validation: the caller fixes the call.
+                PresenceRuntimeError::Domain(_) => Failure::new(
+                    FailureClass::InputRefused,
+                    "invalid_presence_request",
+                    message,
+                ),
+            };
+            presence_refusal_sync(state, meta, failure, sequence)
+        }
     }
 }
 
 fn presence_refusal_sync(
     state: &AppState,
     meta: &CommandMeta,
-    reason: String,
+    failure: Failure,
     sequence: u64,
 ) -> Responses {
-    let reason_hash = body_hash(&json!({ "reason": reason })).expect("Presence refusal hashes");
+    let failure_hash = body_hash(&json!({ "failure": &failure })).expect("Presence refusal hashes");
     let event = CommandOutcomeEvent {
         meta: event_meta_for_projection(
             state,
@@ -1671,10 +1780,10 @@ fn presence_refusal_sync(
             PRESENCE_COMMAND_REFUSED,
             PRESENCE_PROJECTION_ID,
             sequence,
-            reason_hash,
+            failure_hash,
             new_id(),
         ),
-        reason: Some(reason),
+        failure: Some(failure),
         version: 0,
         state: None,
         decision: None,
@@ -1732,7 +1841,11 @@ async fn project_hallway_inbox_inner(
             state,
             &meta,
             RECALL_POLICY_COMMAND_FAILED,
-            Some("Hallway projection requires DATABASE_URL".into()),
+            Some(Failure::new(
+                FailureClass::Configuration,
+                "database_url_missing",
+                "Hallway projection requires DATABASE_URL",
+            )),
         )
         .await;
         return Responses {
@@ -1765,7 +1878,11 @@ async fn project_hallway_inbox_inner(
                 state,
                 &meta,
                 RECALL_POLICY_COMMAND_FAILED,
-                Some(format!("Hallway projection failed: {error}")),
+                Some(akasha_failure(
+                    &error,
+                    "hallway_inbox",
+                    format!("Hallway projection failed: {error}"),
+                )),
             )
             .await;
             return Responses {
@@ -1827,27 +1944,35 @@ async fn project_hallway_inbox_inner(
 /// Host-owned authority gate for Hallway Knock coordination.
 ///
 /// The Host grant and the bound room state gate claims before pool access.
-fn knock_spirit(state: &AppState, meta: &CommandMeta) -> Result<String, AppError> {
+fn knock_spirit(state: &AppState, meta: &CommandMeta) -> Result<String, Failure> {
     let spirit = state
         .room_store
         .embodied_spirit(&state.config.spirit)
-        .map_err(AppError::Config)?;
+        .map_err(|message| {
+            Failure::new(
+                FailureClass::Configuration,
+                "room_state_unavailable",
+                message,
+            )
+        })?;
     knock_authority(&state.config, meta, &spirit)?;
     Ok(spirit)
 }
 
-fn knock_authority(config: &HostConfig, meta: &CommandMeta, spirit: &str) -> Result<(), AppError> {
+fn knock_authority(config: &HostConfig, meta: &CommandMeta, spirit: &str) -> Result<(), Failure> {
     if !config.knock_autonomy.claims_enabled() {
-        return Err(AppError::Refusal {
-            code: "knock_autonomy_disabled",
-            message: "Host Knock autonomy is off; set ATHANOR_HOST_KNOCK_AUTONOMY=claim to enable",
-        });
+        return Err(Failure::new(
+            FailureClass::NotPermitted,
+            "knock_autonomy_disabled",
+            "Host Knock autonomy is off; set ATHANOR_HOST_KNOCK_AUTONOMY=claim to enable",
+        ));
     }
     if meta.sender_room != config.room || meta.sender_spirit != spirit {
-        return Err(AppError::Refusal {
-            code: "foreign_knock_authority",
-            message: "Knock commands must carry this Host's own room and spirit",
-        });
+        return Err(Failure::new(
+            FailureClass::NotPermitted,
+            "foreign_knock_authority",
+            "Knock commands must carry this Host's own room and spirit",
+        ));
     }
     Ok(())
 }
@@ -1859,9 +1984,18 @@ fn app_error_outcome(error: &AppError) -> OutcomeClass {
     }
 }
 
-/// One honest AKASHA read failure: the reason travels, the ledger does not move.
-async fn akasha_failed(state: &AppState, meta: &CommandMeta, reason: String) -> Responses {
-    let failed = outcome(state, meta, AKASHA_COMMAND_FAILED, Some(reason)).await;
+/// An AKASHA error under the Host's own sentence. Its code and class come from
+/// the one AKASHA code table in `failure_map`, never from a second copy here.
+#[track_caller]
+fn akasha_failure(error: &AppError, operation: &str, message: String) -> Failure {
+    let mut failure = crate::failure_map::from_error_body(error.protocol_error_body(operation));
+    failure.message = message;
+    failure.op(operation)
+}
+
+/// One honest AKASHA read failure: the failure travels, the ledger does not move.
+async fn akasha_failed(state: &AppState, meta: &CommandMeta, failure: Failure) -> Responses {
+    let failed = outcome(state, meta, AKASHA_COMMAND_FAILED, Some(failure)).await;
     Responses {
         direct: vec![serialize(&failed)],
         delta: None,
@@ -1877,7 +2011,16 @@ async fn query_akasha_recall(
     payload: AkashaRecallQueryPayload,
 ) -> Responses {
     let Some(pool) = state.hallway_pool.as_ref() else {
-        return akasha_failed(state, &meta, "Akasha recall requires DATABASE_URL".into()).await;
+        return akasha_failed(
+            state,
+            &meta,
+            Failure::new(
+                FailureClass::Configuration,
+                "database_url_missing",
+                "Akasha recall requires DATABASE_URL",
+            ),
+        )
+        .await;
     };
     let config = match SubstrateConfig::from_env() {
         Ok(config) => config,
@@ -1885,7 +2028,11 @@ async fn query_akasha_recall(
             return akasha_failed(
                 state,
                 &meta,
-                format!("Akasha recall requires substrate configuration: {error}"),
+                akasha_failure(
+                    &error,
+                    "recall",
+                    format!("Akasha recall requires substrate configuration: {error}"),
+                ),
             )
             .await;
         }
@@ -1899,13 +2046,20 @@ async fn query_akasha_recall(
     let request = match hearth::RecallRequest::try_from(params) {
         Ok(request) => request,
         Err(error) => {
-            return akasha_failed(state, &meta, format!("Akasha recall refused: {error}")).await;
+            let failure = Failure::new(
+                FailureClass::InputRefused,
+                "invalid_params",
+                format!("Akasha recall refused: {error}"),
+            );
+            return akasha_failed(state, &meta, failure).await;
         }
     };
     let result = match recall(pool, &config, request, None).await {
         Ok(result) => serde_json::to_value(&result).expect("Akasha recall result serializes"),
         Err(error) => {
-            return akasha_failed(state, &meta, format!("Akasha recall failed: {error}")).await;
+            let failure =
+                akasha_failure(&error, "recall", format!("Akasha recall failed: {error}"));
+            return akasha_failed(state, &meta, failure).await;
         }
     };
     let runtime = state.runtime.lock().await;
@@ -1950,7 +2104,11 @@ async fn query_akasha_lessons(
         return akasha_failed(
             state,
             &meta,
-            "Akasha lesson query requires DATABASE_URL".into(),
+            Failure::new(
+                FailureClass::Configuration,
+                "database_url_missing",
+                "Akasha lesson query requires DATABASE_URL",
+            ),
         )
         .await;
     };
@@ -1973,8 +2131,12 @@ async fn query_akasha_lessons(
     let result = match lesson_query(pool, params).await {
         Ok(result) => serde_json::to_value(&result).expect("Akasha lesson result serializes"),
         Err(error) => {
-            return akasha_failed(state, &meta, format!("Akasha lesson query failed: {error}"))
-                .await;
+            let failure = akasha_failure(
+                &error,
+                "lesson_query",
+                format!("Akasha lesson query failed: {error}"),
+            );
+            return akasha_failed(state, &meta, failure).await;
         }
     };
     let runtime = state.runtime.lock().await;
@@ -2007,10 +2169,7 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
     ));
     let spirit = match knock_spirit(state, &meta) {
         Ok(spirit) => spirit,
-        Err(error) => {
-            end_span(span.0.take(), app_error_outcome(&error), Some("app_error"));
-            return hallway_knock_error(state, &meta, "claim", error).await;
-        }
+        Err(failure) => return knock_gate_failed(state, &meta, span.0.take(), failure).await,
     };
     let Some(pool) = state.hallway_pool.as_ref() else {
         end_span(span.0.take(), OutcomeClass::Degraded, None);
@@ -2018,7 +2177,11 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
             state,
             &meta,
             HALLWAY_KNOCK_COMMAND_FAILED,
-            Some("Hallway Knock claim requires DATABASE_URL".into()),
+            Some(Failure::new(
+                FailureClass::Configuration,
+                "database_url_missing",
+                "Hallway Knock claim requires DATABASE_URL",
+            )),
         )
         .await;
         return Responses {
@@ -2078,7 +2241,8 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
         }
         Err(error) => {
             end_span(span.0.take(), app_error_outcome(&error), Some("app_error"));
-            hallway_knock_error(state, &meta, "claim", error).await
+            let (kind, failure) = knock_failure(&error, "hallway_knock_claim", "claim");
+            hallway_knock_error(state, &meta, kind, failure).await
         }
     }
 }
@@ -2096,10 +2260,7 @@ async fn settle_hallway_knock(
     );
     let spirit = match knock_spirit(state, &meta) {
         Ok(spirit) => spirit,
-        Err(error) => {
-            end_span(span, app_error_outcome(&error), Some("app_error"));
-            return hallway_knock_error(state, &meta, "settlement", error).await;
-        }
+        Err(failure) => return knock_gate_failed(state, &meta, span, failure).await,
     };
     let Some(pool) = state.hallway_pool.as_ref() else {
         end_span(span, OutcomeClass::Degraded, None);
@@ -2107,7 +2268,11 @@ async fn settle_hallway_knock(
             state,
             &meta,
             HALLWAY_KNOCK_COMMAND_FAILED,
-            Some("Hallway Knock settlement requires DATABASE_URL".into()),
+            Some(Failure::new(
+                FailureClass::Configuration,
+                "database_url_missing",
+                "Hallway Knock settlement requires DATABASE_URL",
+            )),
         )
         .await;
         return Responses {
@@ -2154,28 +2319,57 @@ async fn settle_hallway_knock(
         }
         Err(error) => {
             end_span(span, app_error_outcome(&error), Some("app_error"));
-            hallway_knock_error(state, &meta, "settlement", error).await
+            let (kind, failure) = knock_failure(&error, "hallway_knock_settle", "settlement");
+            hallway_knock_error(state, &meta, kind, failure).await
         }
     }
+}
+
+/// The Knock gate turned the call away before any pool access: a caller it
+/// refuses is refused, a room state it cannot read failed.
+async fn knock_gate_failed(
+    state: &AppState,
+    meta: &CommandMeta,
+    span: Option<EmitterSpan>,
+    failure: Failure,
+) -> Responses {
+    let refused = matches!(
+        failure.class,
+        FailureClass::InputRefused | FailureClass::NotPermitted | FailureClass::Conflict
+    );
+    let (insula_outcome, kind) = if refused {
+        (OutcomeClass::Refused, HALLWAY_KNOCK_COMMAND_REFUSED)
+    } else {
+        (OutcomeClass::Error, HALLWAY_KNOCK_COMMAND_FAILED)
+    };
+    end_span(span, insula_outcome, Some("knock_gate"));
+    hallway_knock_error(state, meta, kind, failure).await
+}
+
+/// AKASHA's Knock answer: a typed refusal is refused under its own code, any
+/// other error failed.
+#[track_caller]
+fn knock_failure(error: &AppError, operation: &str, step: &str) -> (&'static str, Failure) {
+    let (kind, message) = match error {
+        AppError::Refusal { message, .. } => (
+            HALLWAY_KNOCK_COMMAND_REFUSED,
+            format!("Hallway Knock {step} refused: {message}"),
+        ),
+        other => (
+            HALLWAY_KNOCK_COMMAND_FAILED,
+            format!("Hallway Knock {step} failed: {other}"),
+        ),
+    };
+    (kind, akasha_failure(error, operation, message))
 }
 
 async fn hallway_knock_error(
     state: &AppState,
     meta: &CommandMeta,
-    operation: &str,
-    error: AppError,
+    kind: &str,
+    failure: Failure,
 ) -> Responses {
-    let (kind, reason) = match error {
-        AppError::Refusal { code, message } => (
-            HALLWAY_KNOCK_COMMAND_REFUSED,
-            format!("Hallway Knock {operation} refused ({code}): {message}"),
-        ),
-        other => (
-            HALLWAY_KNOCK_COMMAND_FAILED,
-            format!("Hallway Knock {operation} failed: {other}"),
-        ),
-    };
-    let event = outcome(state, meta, kind, Some(reason)).await;
+    let event = outcome(state, meta, kind, Some(failure)).await;
     Responses {
         direct: vec![serialize(&event)],
         delta: None,
@@ -2588,12 +2782,12 @@ async fn set_requested_mode(
     if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
         return response;
     }
-    if let Err(reason) = refresh_from_room_state(state, &mut runtime) {
+    if let Err(failure) = refresh_from_room_state(state, &mut runtime) {
         let failed = outcome_with_runtime(
             state,
             &meta,
             RECALL_POLICY_COMMAND_FAILED,
-            Some(reason),
+            Some(failure),
             &runtime,
             None,
         );
@@ -2607,9 +2801,13 @@ async fn set_requested_mode(
             state,
             &meta,
             RECALL_POLICY_COMMAND_REFUSED,
-            Some(format!(
-                "stale base_version {base_version}; current version is {}",
-                runtime.cursor.version
+            Some(Failure::new(
+                FailureClass::Conflict,
+                "stale_base_version",
+                format!(
+                    "stale base_version {base_version}; current version is {}",
+                    runtime.cursor.version
+                ),
             )),
             &runtime,
             None,
@@ -2640,29 +2838,49 @@ async fn set_requested_mode(
     )
 }
 
-fn refresh_from_room_state(state: &AppState, runtime: &mut RuntimeState) -> Result<(), String> {
-    runtime.durable.finish_pending(&state.room_store)?;
-    let projection = state.room_store.load()?;
-    let hash = state_hash(&projection)?;
+fn refresh_from_room_state(state: &AppState, runtime: &mut RuntimeState) -> Result<(), Failure> {
+    runtime
+        .durable
+        .finish_pending(&state.room_store)
+        .map_err(|message| {
+            Failure::new(FailureClass::Configuration, "policy_store_failed", message)
+        })?;
+    let projection = state.room_store.load().map_err(|message| {
+        Failure::new(
+            FailureClass::Configuration,
+            "room_state_unavailable",
+            message,
+        )
+    })?;
+    let hash = state_hash(&projection).map_err(|message| {
+        Failure::new(FailureClass::Internal, "projection_cursor_failed", message)
+    })?;
 
     if hash == runtime.cursor.state_hash {
         return Ok(());
     }
 
-    let cursor = runtime.cursor.advance(hash)?;
+    let cursor = runtime.cursor.advance(hash).map_err(|message| {
+        Failure::new(FailureClass::Internal, "projection_cursor_failed", message)
+    })?;
     let sessions = HashMap::from([(
         state.config.session.clone(),
         RecallPolicySession::fresh(&projection),
     )]);
-    let checkpoint = runtime.durable.commit_policy(
-        &state.room_store,
-        PolicyCheckpoint {
-            projection,
-            cursor,
-            sessions,
-        },
-        None,
-    )?;
+    let checkpoint = runtime
+        .durable
+        .commit_policy(
+            &state.room_store,
+            PolicyCheckpoint {
+                projection,
+                cursor,
+                sessions,
+            },
+            None,
+        )
+        .map_err(|message| {
+            Failure::new(FailureClass::Configuration, "policy_store_failed", message)
+        })?;
     runtime.projection = checkpoint.projection;
     runtime.cursor = checkpoint.cursor;
     runtime.sessions = checkpoint.sessions;
@@ -2687,7 +2905,11 @@ fn idempotency_response(
         state,
         meta,
         RECALL_POLICY_COMMAND_REFUSED,
-        Some("idempotency_key was already used for a different command body".into()),
+        Some(Failure::new(
+            FailureClass::Conflict,
+            "idempotency_key_reused",
+            "idempotency_key was already used for a different command body",
+        )),
         runtime,
         None,
     );
@@ -2711,12 +2933,16 @@ fn commit_change(
     let base_version = runtime.cursor.version;
     let cursor = match state_hash(&next).and_then(|hash| runtime.cursor.advance(hash)) {
         Ok(cursor) => cursor,
-        Err(reason) => {
+        Err(message) => {
             let failed = outcome_with_runtime(
                 state,
                 meta,
                 RECALL_POLICY_COMMAND_FAILED,
-                Some(reason),
+                Some(Failure::new(
+                    FailureClass::Internal,
+                    "projection_cursor_failed",
+                    message,
+                )),
                 runtime,
                 None,
             );
@@ -2741,7 +2967,7 @@ fn commit_change(
             next_hash.clone(),
             new_id(),
         ),
-        reason: None,
+        failure: None,
         version: next_version,
         state: Some(next.clone()),
         decision,
@@ -2762,12 +2988,16 @@ fn commit_change(
     );
     let checkpoint = match committed {
         Ok(checkpoint) => checkpoint,
-        Err(reason) => {
+        Err(message) => {
             let failed = outcome_with_runtime(
                 state,
                 meta,
                 RECALL_POLICY_COMMAND_FAILED,
-                Some(reason),
+                Some(Failure::new(
+                    FailureClass::Configuration,
+                    "policy_store_failed",
+                    message,
+                )),
                 runtime,
                 None,
             );
@@ -2821,18 +3051,35 @@ fn commit_change(
     }
 }
 
-fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), String> {
+fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), Failure> {
     let meta = command.meta();
     if meta.max_hops != 1 {
-        return Err("max_hops must be exactly 1".into());
+        return Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_max_hops",
+            "max_hops must be exactly 1",
+        ));
     }
     if meta.correlation_id != meta.message_id {
-        return Err("correlation_id must equal message_id for a client command".into());
+        return Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_correlation_id",
+            "correlation_id must equal message_id for a client command",
+        ));
     }
-    let expires = chrono::DateTime::parse_from_rfc3339(&meta.expires_at)
-        .map_err(|_| "expires_at must be an RFC 3339 timestamp")?;
+    let Ok(expires) = chrono::DateTime::parse_from_rfc3339(&meta.expires_at) else {
+        return Err(Failure::new(
+            FailureClass::InputRefused,
+            "invalid_expires_at",
+            "expires_at must be an RFC 3339 timestamp",
+        ));
+    };
     if expires <= chrono::Utc::now() {
-        return Err("command has expired".into());
+        return Err(Failure::new(
+            FailureClass::Deadline,
+            "command_expired",
+            "command has expired",
+        ));
     }
     let expected = &state.config;
     let blank_binding = meta.house_id.is_empty()
@@ -2851,7 +3098,16 @@ fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), Str
     {
         return Ok(());
     }
-    let spirit = state.room_store.embodied_spirit(&expected.spirit)?;
+    let spirit = state
+        .room_store
+        .embodied_spirit(&expected.spirit)
+        .map_err(|message| {
+            Failure::new(
+                FailureClass::Configuration,
+                "room_state_unavailable",
+                message,
+            )
+        })?;
     if meta.house_id != expected.house_id
         || meta.sender_room != expected.room
         || meta.sender_spirit != spirit
@@ -2863,9 +3119,11 @@ fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), Str
         || meta.visibility != "operator"
         || meta.authority_class != "room_state"
     {
-        return Err(
-            "command binding is foreign or does not match the authenticated Host binding".into(),
-        );
+        return Err(Failure::new(
+            FailureClass::NotPermitted,
+            "foreign_binding",
+            "command binding is foreign or does not match the authenticated Host binding",
+        ));
     }
     Ok(())
 }
@@ -2893,10 +3151,10 @@ async fn outcome(
     state: &AppState,
     meta: &CommandMeta,
     kind: &str,
-    reason: Option<String>,
+    failure: Option<Failure>,
 ) -> CommandOutcomeEvent {
     let runtime = state.runtime.lock().await;
-    outcome_with_runtime(state, meta, kind, reason, &runtime, None)
+    outcome_with_runtime(state, meta, kind, failure, &runtime, None)
 }
 
 async fn outcome_for_ids(
@@ -2904,7 +3162,7 @@ async fn outcome_for_ids(
     message_id: &str,
     idempotency_key: &str,
     kind: &str,
-    reason: Option<String>,
+    failure: Option<Failure>,
 ) -> CommandOutcomeEvent {
     let fallback_id = new_id();
     let message_id = if message_id.trim().is_empty() {
@@ -2929,7 +3187,7 @@ async fn outcome_for_ids(
             runtime.cursor.state_hash.clone(),
             new_id(),
         ),
-        reason,
+        failure,
         version: runtime.cursor.version,
         state: Some(runtime.projection.clone()),
         decision: None,
@@ -2940,7 +3198,7 @@ fn outcome_with_runtime(
     state: &AppState,
     meta: &CommandMeta,
     kind: &str,
-    reason: Option<String>,
+    failure: Option<Failure>,
     runtime: &RuntimeState,
     decision: Option<RecallPolicyDecision>,
 ) -> CommandOutcomeEvent {
@@ -2955,20 +3213,20 @@ fn outcome_with_runtime(
             runtime.cursor.state_hash.clone(),
             new_id(),
         ),
-        reason,
+        failure,
         version: runtime.cursor.version,
         state: Some(runtime.projection.clone()),
         decision,
     }
 }
 
-async fn diagnostic_refusal(state: &AppState, reason: &str) -> String {
+async fn diagnostic_refusal(state: &AppState, failure: Failure) -> String {
     let event = outcome_for_ids(
         state,
         "unparsed-command",
         "unparsed-command",
         RECALL_POLICY_COMMAND_REFUSED,
-        Some(reason.into()),
+        Some(failure),
     )
     .await;
     serialize(&event)
@@ -3539,7 +3797,7 @@ mod tests {
     };
     use crate::config::{HostConfig, KnockAutonomy};
     use akasha::{AppError, OutcomeClass};
-    use protocol::CommandMeta;
+    use protocol::{CommandMeta, Failure, FailureClass};
     use std::time::{Duration, Instant};
 
     fn config(knock_autonomy: KnockAutonomy) -> HostConfig {
@@ -3585,11 +3843,9 @@ mod tests {
         }
     }
 
-    fn refusal_code(error: AppError) -> &'static str {
-        match error {
-            AppError::Refusal { code, .. } => code,
-            other => panic!("expected a typed refusal, got {other:?}"),
-        }
+    fn refusal_code(failure: Failure) -> String {
+        assert_eq!(failure.class, FailureClass::NotPermitted);
+        failure.code
     }
 
     #[test]

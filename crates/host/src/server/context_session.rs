@@ -131,7 +131,7 @@ pub(super) fn invalidate(
 }
 
 pub(super) async fn lesson_plan(state: &AppState, meta: CommandMeta, raw: Value) -> Responses {
-    let result = async {
+    let result: Result<Value, String> = async {
         let request: lessons::LessonPlanRequest =
             serde_json::from_value(raw).map_err(|error| error.to_string())?;
         if request.native_user && !request.capabilities.top_level {
@@ -164,11 +164,28 @@ pub(super) async fn lesson_plan(state: &AppState, meta: CommandMeta, raw: Value)
         Ok(result)
     }
     .await;
+    // ponytail: every lesson-plan refusal is Internal; upgrade when the inner
+    // chain returns Failure (slice C) and each refusal declares its own class.
+    let result = result.map_err(|reason| {
+        protocol::Failure::new(
+            protocol::FailureClass::Internal,
+            "lesson_plan_failed",
+            reason,
+        )
+    });
     response(state, &meta, "athanor.context.lesson_planned", result).await
 }
 
 pub(super) async fn prepare(state: &AppState, meta: CommandMeta, raw: Value) -> Responses {
-    let result = prepare_inner(state, &meta, raw).await;
+    // ponytail: every prepare refusal is Internal; upgrade when prepare_inner
+    // returns Failure (slice C) and each refusal declares its own class.
+    let result = prepare_inner(state, &meta, raw).await.map_err(|reason| {
+        protocol::Failure::new(
+            protocol::FailureClass::Internal,
+            "context_prepare_failed",
+            reason,
+        )
+    });
     response(state, &meta, "athanor.context.prepared", result).await
 }
 
@@ -396,14 +413,14 @@ async fn response(
     state: &AppState,
     meta: &CommandMeta,
     kind: &str,
-    result: Result<Value, String>,
+    result: Result<Value, protocol::Failure>,
 ) -> Responses {
     let result = match result {
         Ok(result) => result,
-        Err(reason) => {
+        Err(failure) => {
             return Responses {
                 direct: vec![serialize(
-                    &outcome(state, meta, RECALL_POLICY_COMMAND_FAILED, Some(reason)).await,
+                    &outcome(state, meta, RECALL_POLICY_COMMAND_FAILED, Some(failure)).await,
                 )],
                 delta: None,
             };
@@ -434,15 +451,15 @@ async fn organ(
     meta: &CommandMeta,
     operation: OrganOperation,
     params: Value,
-) -> Result<Value, protocol::ProtocolErrorBody> {
+) -> Result<Value, protocol::Failure> {
     let params = params.as_object().cloned().ok_or_else(|| {
-        protocol::ProtocolErrorBody::application(
+        protocol::Failure::new(
+            protocol::FailureClass::InputRefused,
             "invalid_params",
             "organ parameters must be an object",
         )
-        .build()
     })?;
-    match crate::organ::call(
+    crate::organ::call(
         &state.config,
         state.hallway_pool.as_ref(),
         meta,
@@ -455,10 +472,6 @@ async fn organ(
         &state.orihon,
     )
     .await
-    {
-        protocol::ResponsePayload::Result { result } => Ok(result),
-        protocol::ResponsePayload::Error { error } => Err(error),
-    }
 }
 
 fn child_meta(meta: &CommandMeta, turn: &str, stage: &str, projection: &str) -> CommandMeta {
@@ -476,7 +489,7 @@ fn child_meta(meta: &CommandMeta, turn: &str, stage: &str, projection: &str) -> 
 }
 
 async fn command(state: &AppState, command: ClientCommand, hash: Value) -> Result<Value, String> {
-    super::validate_command(state, &command)?;
+    super::validate_command(state, &command).map_err(|failure| failure.message)?;
     // The service dispatcher is a large future; do not inline it into every
     // nested context command's polling frame.
     let response = Box::pin(super::execute_service_command(
@@ -493,7 +506,11 @@ async fn command(state: &AppState, command: ClientCommand, hash: Value) -> Resul
         let value: Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
         let kind = text(&value["command_or_event_type"]);
         if kind.ends_with("command_failed") || kind.ends_with("command_refused") {
-            return Err(text(&value["reason"]).to_owned());
+            // ponytail: the nested class is dropped here; upgrade when callers
+            // chain Failure instead of String (slice C).
+            let failure = protocol::Failure::deserialize(&value["failure"])
+                .map_err(|error| format!("{kind} carried no readable failure: {error}"))?;
+            return Err(failure.message);
         }
         answer = Some(value);
     }
@@ -519,7 +536,10 @@ async fn judge(state: &AppState, request: JudgmentRequest) -> Result<Value, Stri
         &state.config.room,
         request,
     )
-    .await;
+    .await
+    // ponytail: the judgment class is dropped here; upgrade when judge's
+    // callers chain Failure instead of String (slice C).
+    .map_err(|failure| failure.message);
     if let Some(grant) = grant {
         if let Ok(result) = &mut result {
             result["receipt"] = observations::receipt(&result["receipt"]);

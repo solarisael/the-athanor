@@ -202,7 +202,7 @@ function lifecycleHost() {
         const reply = (body: Record<string, unknown>) => socket.send(JSON.stringify({
           command_or_event_type: "athanor.organ.result", correlation_id: envelope.message_id, ...body,
         }));
-        if (operation !== "worker_lifecycle") return reply({ error: { code: "unexpected_operation", message: operation, retryable: false } });
+        if (operation !== "worker_lifecycle") return reply({ failure: { class: "input_refused", code: "unexpected_operation", message: operation, hops: [] } });
         calls.push({ session, params });
         const key = `${session}\0${params.requestId}`;
         try {
@@ -210,7 +210,7 @@ function lifecycleHost() {
           reply({ result: replies.get(key) });
         } catch (error) {
           const code = error instanceof Refusal ? error.code : "internal";
-          reply({ error: { code, message: `worker_lifecycle refused: ${code}`, retryable: false } });
+          reply({ failure: { class: code === "internal" ? "internal" : "conflict", code, message: `worker_lifecycle refused: ${code}`, hops: [] } });
         }
       },
     },

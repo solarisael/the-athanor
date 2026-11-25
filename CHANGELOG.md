@@ -74,6 +74,12 @@ the exact implementation record.
 - The automatic context budget is 12 s on every platform. Before this change,
   the Host kept 2 s off Windows and the adapter kept 8 s. The Host used the
   earlier deadline, so automatic Recall rarely completed on Linux.
+- Automatic context works on OMP 19.1. OMP 19.1 removed `settings.get(key)`, so
+  each turn from 22 Nov 2026 lost the wake boat, the Recall working set, and the
+  Presence contract. The adapter now reads the compaction settings through
+  `Settings.rawValue`. Settings that it cannot read remove only the compaction
+  threshold, with one warning. The boat line, which the same defect disabled,
+  works again.
 - A retired room no longer holds the other rooms. The Host closed rooms one at
   a time and waited for each one, and the broker refused `athanor-host` the
   delete of a hallway consumer, so each retired room held every later change

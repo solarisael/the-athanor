@@ -66,7 +66,7 @@ import {
   syncLessonTtsr,
   contextLessonManagerAvailable,
 } from "./house-proof/lesson-ttsr.ts";
-import { boatLineTokens, installBoatDoor } from "./house-proof/boat-door.ts";
+import { boatLineTokens, compactionSettings, installBoatDoor } from "./house-proof/boat-door.ts";
 import { MODE_COMMANDS, MODE_DOOR_TYPE, modeDoor } from "./house-proof/mode-door.ts";
 import {
   CONTEXT_BLOCK_TYPES,
@@ -417,8 +417,8 @@ export default function solarisaelHouseProof(pi, release) {
     },
     tokensOverBoatLine: async (ctx) => {
       const usage = ctx.getContextUsage?.();
-      const settings = pi.pi?.settings;
-      if (!usage?.tokens || !usage.contextWindow || !settings?.get?.("compaction.enabled")) return undefined;
+      const compaction = compactionSettings(pi.pi?.settings);
+      if (!usage?.tokens || !usage.contextWindow || !compaction?.enabled) return undefined;
       let resolved: ReturnType<typeof roomBinding> = null;
       try {
         resolved = roomBinding(ctx);
@@ -426,11 +426,7 @@ export default function solarisaelHouseProof(pi, release) {
         return undefined;
       }
       if (!resolved) return undefined;
-      return usage.tokens - await boatLineTokens(resolved.binding, usage.contextWindow, {
-        thresholdTokens: settings.get("compaction.thresholdTokens"),
-        thresholdPercent: settings.get("compaction.thresholdPercent"),
-        reserveTokens: settings.get("compaction.reserveTokens"),
-      });
+      return usage.tokens - await boatLineTokens(resolved.binding, usage.contextWindow, compaction);
     },
     room: (ctx) => {
       const { spirit, effectiveRoomDir, houseDir } = requireRoomContext(ctx);
@@ -1045,7 +1041,9 @@ export default function solarisaelHouseProof(pi, release) {
 
       return result.value;
     }
-    console.warn(`[athanor] Automatic context ${result.status === "timeout" ? "timed out" : "unavailable"}`);
+    console.warn(result.status === "timeout"
+      ? "[athanor] Automatic context timed out"
+      : `[athanor] Automatic context unavailable: ${result.error instanceof Error ? result.error.stack ?? result.error.message : String(result.error)}`);
     if (contextSettlementKey) pendingPresenceContracts.delete(contextSettlementKey);
     const messages = Array.isArray(event?.messages) ? event.messages : [];
     // Failed preparation cannot validate Host blocks. Restore only known mode messages.

@@ -38,7 +38,7 @@ in `tools.ts` reaches both harnesses, and the two lists cannot drift.
 | Piece | Source |
 |---|---|
 | stdio server | `@modelcontextprotocol/sdk`, as in `adapters/workspace-search/src/mcp.ts` |
-| Host access | `~/.omp/agent/athanor/client.json`, projected into the same environment keys that `installed-loader.ts` sets |
+| Host access | The `ATHANOR_HOST_*` keys of the environment; else `~/.omp/agent/athanor/client.json` (Windows); else `host.token` and `config/runtime.json` in the Linux data root |
 | room | `ATHANOR_CLIENT_ROOM_DIR`, or the launch directory, resolved by the existing room code |
 | session | `mcp-<uuid>`, minted once for each server process |
 | `instructions` | `<houseDir>/ORGANS.md`, read at startup |

@@ -109,4 +109,26 @@ describe.skipIf(!ROOM_DIR)("house-mcp against the live Host", () => {
       await stdio.close();
     }
   }, LIVE_TIMEOUT_MS);
+
+  test("a server launched with only the room folder finds the Host keys and answers room_state", async () => {
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+    const marker = JSON.parse(readFileSync(path.join(ROOM_DIR, ".athanor-room.json"), "utf8"));
+    // The SDK passes only HOME, LOGNAME, PATH, SHELL, TERM, and USER besides
+    // `env`, so no ATHANOR_HOST_* key of this process reaches the server.
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [SERVER_PATH],
+      env: { ATHANOR_CLIENT_ROOM_DIR: ROOM_DIR },
+    });
+    const stdio = new Client({ name: "house-mcp-room-only-test", version: "0" });
+    await stdio.connect(transport);
+    try {
+      const result = await stdio.callTool({ name: "room_state", arguments: {} }, undefined, { timeout: LIVE_TIMEOUT_MS }) as Result;
+      expect(result.isError).toBeFalsy();
+      expect(JSON.parse(text(result)).state.room).toBe(marker.room);
+    } finally {
+      await stdio.close();
+    }
+  }, LIVE_TIMEOUT_MS);
 });

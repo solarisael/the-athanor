@@ -74,6 +74,7 @@ the exact implementation record.
 - Schema 50 adds table `spirit_texts`. It holds the identity contract, the presence text, and the spirit text of each spirit, with every revision. The Host does not read this table yet. `substrate/import-spirit-texts.sh` copies text files into the table and proves each copy by SHA-256.
 
 ### Fixed
+- A paper boat no longer removes the prompt cache of its session. `sleep` closes the Presence frame, and the Host then removed each saved context turn of the session. The next request had a different history from the first turn, so the provider read the full conversation again. The Host now retires only the Presence block and keeps the turns that it sent. A changed identity still removes them.
 - A backup after a paper boat or a memory no longer stops the Host. The `pg_dump`
   ran on an async worker thread for about 35 s. During that time no room got an
   answer, session leases expired, and Orihon capture reported "require an active

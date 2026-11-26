@@ -89,7 +89,15 @@ pub(super) async fn synchronize(
             )?,
         });
     }
-    if invalidation.is_some() {
+
+    // A boat closes the frame while the identity stays the same. Clearing the
+    // sent turns here changed the provider prefix and cost the whole prompt cache.
+    let presence_only =
+        cache_failure.is_some() && !changed && !foreign_frame && !unlabelled && !format_changed;
+
+    if presence_only {
+        cache::retire_presence(saved);
+    } else if invalidation.is_some() {
         saved.recall_subject = None;
         if format_changed && !changed && !foreign_frame && proven {
             // Format cutovers discard incompatible blocks; ordinary refreshes only retire them.

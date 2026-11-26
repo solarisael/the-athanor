@@ -291,6 +291,10 @@ pub(super) fn retire_recall(saved: &mut SavedSession) -> bool {
     retire_dynamic(saved, true, true)
 }
 
+pub(super) fn retire_presence(saved: &mut SavedSession) -> bool {
+    retire_dynamic(saved, false, true)
+}
+
 fn retire_dynamic(saved: &mut SavedSession, recall: bool, presence: bool) -> bool {
     if !recall && !presence {
         return false;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  HostRefused,
   HostUnavailable,
   hostCommand,
   sendHostCommand as sendRawHostCommand,
@@ -82,7 +83,11 @@ async function send(command: HostCommand): Promise<SnapshotEvent> {
   try {
     return await sendRawHostCommand(command, new Set([COMMAND_ACCEPTED, POLICY_SNAPSHOT])) as SnapshotEvent;
   } catch (error) {
-    if (error instanceof HostUnavailable) throw new RecallPolicyHostUnavailable(error.message);
+    // HostRefused extends HostUnavailable, but a refusal is the Host's answer:
+    // it keeps its class and code. Only a Host that did not answer is unavailable.
+    if (error instanceof HostUnavailable && !(error instanceof HostRefused)) {
+      throw new RecallPolicyHostUnavailable(error.message);
+    }
     throw error;
   }
 }

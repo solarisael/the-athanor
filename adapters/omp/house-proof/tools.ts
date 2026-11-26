@@ -12,7 +12,7 @@ import {
   roomCapability,
   statePathForRoom,
 } from "./room.ts";
-import { RECALL_POLICY_MODES, RecallPolicyHostClient } from "./recall-policy.ts";
+import { RECALL_POLICY_MODES, RecallPolicyHostClient, RecallPolicyHostUnavailable } from "./recall-policy.ts";
 import { hostHouseId, hostSessionIdentity, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { PAPER_BOAT_GUIDANCE } from "./paper-boat.ts";
@@ -1429,11 +1429,16 @@ export function registerSolarisaelTools(pi, release) {
           details: output,
         };
       } catch (error) {
+        // Only a Host that did not answer degrades the policy. A refusal, and
+        // every other failure, reaches the shared failure path with its code.
+        if (!(error instanceof RecallPolicyHostUnavailable)) throw error;
+
         const output = {
           ok: false,
           room,
           degraded: true,
-          error: error instanceof Error ? error.message : String(error),
+          code: error.code,
+          error: error.message,
         };
         return {
           isError: true,

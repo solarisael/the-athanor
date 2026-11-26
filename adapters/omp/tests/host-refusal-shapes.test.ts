@@ -1,27 +1,38 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { noteChatMessageStart, noteChatToolEnd, noteChatToolStart, startChatDoorman, stopChatDoorman } from "../house-proof/chat.ts";
+import { registerTopLevelSession, retireTopLevelSession } from "../house-proof/top-level-session-fence.ts";
 import { registerSolarisaelTools } from "../house-proof/tools.ts";
 import { __sessionTest } from "../house-proof/session.ts";
 
 // A Host failure reaches the tool result with its class, code, message and
 // hops, on the organ path and on a direct sendHostCommand path (#57, #56 A1).
 // A nested `{error: {code, message}}` session refusal keeps its code (#58).
+// recall_policy and the chat doorman tell a refusal apart from an absent Host (#60).
 
 const KEYS = ["ATHANOR_HOST_URL", "ATHANOR_HOST_TOKEN", "ATHANOR_HOST_HOUSE_ID", "ATHANOR_CLIENT_ROOM_DIR"] as const;
 const HOP = { layer: "host", file: "crates/host/src/server/native_commands.rs", line: 8, op: "routing_status" };
 const HOST_FAILURE = { class: "input_refused", code: "invalid_request", message: "the lane table is unreadable", hops: [HOP] };
 const ORGAN_FAILURE = { class: "conflict", code: "knock_state_conflict", message: "the knock was already claimed", hops: [HOP] };
 const CONFLICT = { code: "revision_conflict", message: "the document changed since it was read", currentRevision: "sha256:feed" };
+const CHAT = { room: "probe", spirit: "Probe", session: "probe-session" };
 
 let directory = "";
 let saved: Record<string, string | undefined> = {};
 let server: ReturnType<typeof Bun.serve>;
+let commands: Array<Record<string, any>> = [];
+// The say the Host hands to chatNext. With none, chatNext is refused like every other command.
+let offeredSay: Record<string, unknown> | null = null;
+let warnings: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   __sessionTest.reset();
+  commands = [];
+  offeredSay = null;
+  warnings = spyOn(console, "warn").mockImplementation(() => {});
   directory = mkdtempSync(path.join(tmpdir(), "host-refusal-shapes-"));
   writeFileSync(path.join(directory, ".athanor-room.json"), JSON.stringify({ room: "probe", trueName: "Probe" }));
   saved = Object.fromEntries(KEYS.map((key) => [key, process.env[key]]));
@@ -37,6 +48,15 @@ beforeEach(() => {
     websocket: {
       message(socket, input) {
         const request = JSON.parse(String(input));
+        commands.push(request);
+        if (offeredSay && request.lifecycle_request?.action === "chatNext") {
+          socket.send(JSON.stringify({
+            correlation_id: request.message_id,
+            command_or_event_type: "athanor.lifecycle.result",
+            result: { next: offeredSay },
+          }));
+          return;
+        }
         const organ = request.command_or_event_type === "athanor.organ.call";
         socket.send(JSON.stringify({
           correlation_id: request.message_id,
@@ -53,6 +73,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  stopChatDoorman(CHAT);
+  retireTopLevelSession(CHAT.room, CHAT.session);
+  warnings.mockRestore();
   server.stop(true);
   __sessionTest.reset();
   for (const key of KEYS) {
@@ -77,6 +100,32 @@ async function runTool(name: string, params: Record<string, unknown>) {
     registerHook() {},
   }, { version: "test" });
   return await tools.get(name)!.execute("call-1", params, undefined, undefined, ctx());
+}
+
+function sent(type: string) {
+  return commands.filter((command) => command.command_or_event_type === type);
+}
+
+function chatWarnings(): string[] {
+  return warnings.mock.calls.map((args) => String(args[0])).filter((line) => line.includes("Chat doorman"));
+}
+
+// The doorman's OMP side: the poll it registers and the says it sends.
+function chatDoorman() {
+  const says: any[] = [];
+  let poll!: () => Promise<void>;
+  const context = {
+    ...ctx(),
+    isIdle: () => true,
+    setInterval: (callback: () => Promise<void>) => { poll = callback; return 1; },
+    clearInterval() {},
+  };
+  startChatDoorman({ sendMessage: (message: any) => says.push({ ...message, role: "custom" }) }, context, CHAT);
+  return { says, poll: () => poll() };
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  for (let waited = 0; !condition() && waited < 2_000; waited += 10) await Bun.sleep(10);
 }
 
 test("an organ failure reaches the tool with its class, code and hops", async () => {
@@ -117,4 +166,57 @@ test("home_resource_write refused with revision_conflict keeps its code and curr
   expect(result.details.code).toBe("revision_conflict");
   expect(result.details.message).toBe(CONFLICT.message);
   expect(result.details.currentRevision).toBe("sha256:feed");
+});
+
+test("recall_policy refused keeps the Host's class and code, and is not degraded", async () => {
+  const result = await runTool("recall_policy", {});
+
+  expect(result.isError).toBe(true);
+  expect(result.details.code).toBe("invalid_request");
+  expect(result.details.message).toBe(HOST_FAILURE.message);
+  expect(result.details.details.class).toBe("input_refused");
+  expect(result.details.degraded).toBeUndefined();
+});
+
+test("recall_policy with no Host to answer is degraded and keeps its code", async () => {
+  server.stop(true);
+
+  const result = await runTool("recall_policy", {});
+
+  expect(result.isError).toBe(true);
+  expect(result.details.degraded).toBe(true);
+  expect(result.details.code).toBe("recall_policy_host_unavailable");
+});
+
+test("a refused doorman tick warns once and asks no more until a new doorman starts", async () => {
+  registerTopLevelSession(CHAT.room, CHAT.session);
+  const doorman = chatDoorman();
+
+  await doorman.poll();
+  await doorman.poll();
+
+  expect(sent("athanor.lifecycle.plan")).toHaveLength(1);
+  expect(chatWarnings()).toEqual([expect.stringContaining("stopped until the next turn: the Host refused (invalid_request)")]);
+
+  await chatDoorman().poll();
+
+  expect(sent("athanor.lifecycle.plan")).toHaveLength(2);
+  expect(chatWarnings()).toHaveLength(2);
+});
+
+test("a refused chat draft warns once, and its say sends no more drafts", async () => {
+  registerTopLevelSession(CHAT.room, CHAT.session);
+  offeredSay = { author: "operator", authorName: "Sol", turnId: "say-1", sequence: 1, text: "how is the dragon doing?" };
+  const doorman = chatDoorman();
+  await doorman.poll();
+  noteChatMessageStart(doorman.says[0]);
+
+  noteChatToolStart({ toolCallId: "tool-1", toolName: "read" });
+  await until(() => chatWarnings().length > 0);
+  noteChatToolEnd({ toolCallId: "tool-1" });
+  // A tool step reports at once, so a second draft would reach the Host within this wait.
+  await Bun.sleep(200);
+
+  expect(sent("athanor.chat.draft")).toHaveLength(1);
+  expect(chatWarnings()).toEqual([expect.stringContaining("sends no more drafts for say say-1: the Host refused (invalid_request)")]);
 });

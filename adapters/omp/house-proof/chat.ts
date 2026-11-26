@@ -24,7 +24,7 @@ import {
   openSurfaceDoor,
   overBoatLine,
 } from "./boat-door.ts";
-import { hostCommand, sendHostCommand, HostUnavailable, type HostBinding } from "./host.ts";
+import { hostCommand, sendHostCommand, HostRefused, HostUnavailable, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { conversationText } from "./text.ts";
 import { generatedTurnKey } from "./turn-origin.ts";
@@ -63,6 +63,7 @@ type ChatDraft = {
   reports: number;
   dirty: boolean;
   flushing: boolean;
+  refused: boolean;
   timer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -105,6 +106,12 @@ function warn(state: ChatDoormanState, message: string): void {
   if (now - state.lastWarningAt < CHAT_WARNING_COOLDOWN_MS) return;
   state.lastWarningAt = now;
   console.warn(`[athanor] Chat doorman degraded: ${message}`);
+}
+
+// A refusal is the Host's answer, and asking again does not change it. Each
+// caller stops asking before it warns, so a refusal is told once, with no cooldown.
+function warnRefused(refusal: HostRefused, consequence: string): void {
+  console.warn(`[athanor] Chat doorman ${consequence}: the Host refused (${refusal.code}): ${refusal.message}`);
 }
 
 function sayMessage(line: ChatLine): Record<string, unknown> {
@@ -156,7 +163,7 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
     if (boatDoorOpen()) return;
     state.pendingSayId = next.turnId;
-    state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, timer: null };
+    state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, refused: false, timer: null };
 
     if (command || nearLimit) {
       const opened = openSurfaceDoor(state.ctx, {
@@ -174,7 +181,15 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     }
     state.pi.sendMessage(sayMessage(next), { deliverAs: "nextTurn", triggerTurn: true });
   } catch (error) {
-    if (!(error instanceof HostUnavailable)) {
+    if (error instanceof HostRefused) {
+      // Every poll would meet the same refusal, so the doorman stops. The next
+      // turn or session start makes a new doorman. A doorman stopped while it
+      // waited may already have that successor under its key.
+      if (!state.stopped) {
+        stopChatDoorman(state.binding);
+        warnRefused(error, "stopped until the next turn");
+      }
+    } else if (!(error instanceof HostUnavailable)) {
       warn(state, error instanceof Error ? error.message : String(error));
     }
   } finally {
@@ -318,7 +333,7 @@ function clearDraftTimer(state: ChatDoormanState): void {
 
 function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
   const draft = state.draft;
-  if (!draft || state.settledReport || state.stopped) return;
+  if (!draft || draft.refused || state.settledReport || state.stopped) return;
   draft.dirty = true;
   if (draft.timer) return;
   draft.timer = setTimeout(() => {
@@ -330,7 +345,7 @@ function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
 async function flushDraft(state: ChatDoormanState): Promise<void> {
   const draft = state.draft;
   const sayId = state.pendingSayId;
-  if (!draft || !sayId || draft.flushing || state.settledReport || state.stopped) return;
+  if (!draft || !sayId || draft.flushing || draft.refused || state.settledReport || state.stopped) return;
   draft.flushing = true;
   draft.dirty = false;
   draft.reports += 1;
@@ -355,7 +370,11 @@ async function flushDraft(state: ChatDoormanState): Promise<void> {
       ACCEPTED,
     );
   } catch (error) {
-    if (!(error instanceof HostUnavailable)) {
+    if (error instanceof HostRefused) {
+      // Every later draft of this say would meet the same refusal.
+      draft.refused = true;
+      warnRefused(error, `sends no more drafts for say ${sayId}`);
+    } else if (!(error instanceof HostUnavailable)) {
       warn(state, error instanceof Error ? error.message : String(error));
     }
   } finally {

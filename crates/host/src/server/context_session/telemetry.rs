@@ -253,7 +253,6 @@ pub(super) fn diagnostic(
     if let Some(share) = budget {
         diagnostic["code"] = json!("AUTOMATIC_RECALL_BUDGET_EXHAUSTED");
         diagnostic["category"] = json!(protocol::DiagnosticCategory::Operation);
-        diagnostic["stage"] = json!("budget");
         diagnostic["budget"] = json!({"share_ms":share,"context_budget_ms":CONTEXT_BUDGET_MS});
     }
     diagnostic

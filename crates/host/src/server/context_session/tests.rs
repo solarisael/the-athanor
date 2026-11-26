@@ -1191,7 +1191,7 @@ async fn native_recall_export_is_opt_in_and_preserves_the_record_contract() {
 }
 
 #[tokio::test]
-async fn budget_telemetry_writes_a_known_diagnostic_category() {
+async fn budget_telemetry_writes_a_known_diagnostic_category_and_stage() {
     let fixture = Fixture::new();
     let request: ContextPrepareRequest =
         serde_json::from_value(fixture.request("first").await).unwrap();
@@ -1208,6 +1208,8 @@ async fn budget_telemetry_writes_a_known_diagnostic_category() {
     assert_eq!(diagnostic["code"], "AUTOMATIC_RECALL_BUDGET_EXHAUSTED");
     serde_json::from_value::<protocol::DiagnosticCategory>(diagnostic["category"].clone())
         .expect("budget telemetry category is a DiagnosticCategory");
+    serde_json::from_value::<protocol::DiagnosticStage>(diagnostic["stage"].clone())
+        .expect("budget telemetry stage is a DiagnosticStage");
 }
 
 #[tokio::test]

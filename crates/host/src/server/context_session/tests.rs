@@ -1077,6 +1077,50 @@ async fn lost_native_presence_invalidates_replay_and_credential_gating_uses_the_
 }
 
 #[tokio::test]
+async fn a_closed_frame_keeps_the_turns_already_sent() {
+    let fixture = Fixture::new();
+    let capabilities = Capabilities {
+        automatic_recall: false,
+        top_level: true,
+    };
+    let request = fixture.request_for("first", capabilities, true).await;
+    prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let mut request = fixture.request_for("boat", capabilities, true).await;
+    request["visibleTurnIds"] = json!(["first", "boat"]);
+    let before = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let sent_boat_blocks = before["turns"][1]["blocks"].as_array().unwrap().clone();
+
+    // The boat closes the frame in the middle of its own turn.
+    fixture.state.runtime.lock().await.presence = PresenceRuntime::default();
+    let mut request = fixture.request_for("boat", capabilities, true).await;
+    request["visibleTurnIds"] = json!(["first", "boat"]);
+    let after = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(after["invalidationReason"], "presence-frame-unavailable");
+    assert_eq!(after["turns"][0], before["turns"][0]);
+    let boat_blocks = after["turns"][1]["blocks"].as_array().unwrap();
+    assert_eq!(boat_blocks[..sent_boat_blocks.len()], sent_boat_blocks[..]);
+    assert!(
+        fixture
+            .state
+            .runtime
+            .lock()
+            .await
+            .presence
+            .has_current_contract(
+                &fixture.meta.sender_session,
+                text(&after["presenceSettlement"]["contractId"])
+            )
+    );
+}
+
+#[tokio::test]
 async fn native_recall_export_is_opt_in_and_preserves_the_record_contract() {
     let fixture = Fixture::new();
     let mut request: ContextPrepareRequest =

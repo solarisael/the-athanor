@@ -97,6 +97,8 @@ Panel and surface doors refuse a query string, hold 4 concurrent operations, and
 Text frames carry JSON commands. Binary frames receive a refusal.
 The parser validates the envelope before execution.
 The Host checks the House, room, current embodied spirit, scope, and recipient.
+A refusal uses the projection that owns the command type: `athanor.<projection>.command_refused`.
+A frame without a known command type gets `athanor.command_refused` and an empty `projection_id`.
 The shared bearer does not establish person-level identity.
 `sender_session` remains a caller-supplied identifier.
 The implementation is `crates/host/src/server.rs`, including `validate_command` and `execute_command`.

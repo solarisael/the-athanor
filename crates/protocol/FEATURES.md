@@ -8,7 +8,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 
 The Host command socket. One file holds the projection constants, the recall policy wire, the chat shapes, the Presence wire, the client command parser, and the projection events.
 
-**Commands and projections.** Every command carries `CommandMeta`. `RawClientCommand::meta` maps each command type to the projection it expects, and refuses any other (`host.rs:837-860`). `ClientCommand` has 33 variants (`host.rs:915-1049`). Ten projections exist:
+**Commands and projections.** Every command carries `CommandMeta`. `command_projection` maps each command type to the projection that owns it (`host.rs:881-916`). `RawClientCommand::meta` refuses a known type that carries another projection. The type match in `parse_client_command` refuses an unknown type. `ClientCommand` has 33 variants (`host.rs:1007-1168`). Ten projections exist:
 
 | Projection | Commands in | Events out | Lines |
 |---|---|---|---|
@@ -33,6 +33,7 @@ The Host command socket. One file holds the projection constants, the recall pol
 - `CommandMeta` carries the sender room, the sender spirit, the sender session, the correlation chain, the scope, the visibility, and the authority class (`host.rs:789-809`).
 - `CommandMeta` and `EventMeta` carry no sender operator (`host.rs:793-795,1755-1757`).
 - A parse failure keeps the message identifier and the idempotency key, so the Host can still answer (`CommandParseError`, `host.rs:1092-1096`).
+- `COMMAND_REFUSED` (`athanor.command_refused`) is the refusal kind for a frame whose command type no projection owns (`host.rs:16-17`).
 - `ChatEvent` flattens `EventMeta` (`host.rs:1742-1749`).
 - A source record reference names a record type and a record identifier (`host.rs:378-381`).
 

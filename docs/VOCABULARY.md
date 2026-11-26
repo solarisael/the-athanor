@@ -34,7 +34,7 @@ Status: current. Verified against the code at commit `a6ab453` on 2026-10-04. Ea
 | Striatum | The GIGA slice that keeps reviewed lessons warm while a work state persists. **Not re-verified at a6ab453**: `crates/akasha` and `crates/hearth` decide. | Nearest row: the lesson TTSR bridge (`adapters/omp/index.ts:1033-1056`) |
 | paper boat | The letter that `sleep` writes and `wake` delivers to the next session. | `adapters/omp/boat-door.ts:76-83,129-133,321-343`; `substrate.ts:541-556` |
 | Hallway | A shared surface between rooms. It never merges their spirits or histories. | 7 `hallway_*` tools (`tools.ts:1596-1776`); one ChatLog per room (`house.rs:184-189`) |
-| Bell | The automatic unread-inbox notice for Hallways. It is a projection, not a tool, and it needs the Host. | `adapters/omp/index.ts:1720`; `hallway.ts:26-30` |
+| Bell | The automatic unread-inbox notice for Hallways. It is a projection, not a tool, and it needs the Host. | `crates/host/src/server/context_session/assembly.rs:341-402` |
 | Knock | A request for one bounded turn in a peer room. The Host claims and settles it behind `knock_authority`. | `crates/host/src/server.rs:1649-1665`; `knock.ts:77-114` |
 | Docket | The House quest board: offers, claims, receipts, and evidence. | 5 `quest_*` tools; room capability (`room.ts:147-155`) |
 | Presence | One frame per session. It compiles the prompt, recalled set, lessons, and directives for each turn. | `adapters/omp/presence.ts:72-81,117-170`; `crates/host/src/presence.rs:155,174-188` |

@@ -10,8 +10,9 @@
  *   resolved by adapters/omp/house-proof/room.ts. No room, no server.
  * - One session per process: `mcp-<uuid>`, the room's top-level session here,
  *   as an OMP spirit session is in its own process.
- * - Host access is the OMP session's: the House-wide token, projected from
- *   ~/.omp/agent/athanor/client.json with the keys and rule installed-loader.ts uses.
+ * - Host access is the OMP session's: the House-wide token. resolveHostEnvironment
+ *   takes each Host key from the environment, else from client.json (Windows),
+ *   else from the Linux data root, so the server needs no OMP environment.
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -101,42 +102,121 @@ function errorText(error: unknown): string {
 }
 
 const CLIENT_PROJECTION = path.join(".omp", "agent", "athanor", "client.json");
-// The keys installed-loader.ts projects from client.json, with the same rule:
-// a key the operator already set wins.
-const PROJECTED_KEYS = [
+// The keys installed-loader.ts projects from client.json.
+const CLIENT_KEYS = [
   ["ATHANOR_STATE_DIR", "stateRoot"],
   ["ATHANOR_HOST_HOUSE_ID", "houseId"],
   ["ATHANOR_HOST_TOKEN", "hostToken"],
   ["ATHANOR_HOST_URL", "hostUrl"],
 ] as const;
+// house-proof/host.ts refuses every Host call without these keys. Without
+// ATHANOR_HOST_URL, it uses ws://127.0.0.1:8787.
+const REQUIRED_HOST_KEYS = ["ATHANOR_HOST_TOKEN", "ATHANOR_HOST_HOUSE_ID"] as const;
 
-/** Returns the keys it set. A missing client.json leaves the environment as given. */
-export function projectClientEnvironment(
+// Environment key to value. A blank value means that the place does not hold the key.
+type HostKeys = Record<string, string>;
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Sets each Host key that `env` lacks, and returns the keys it set with the
+ * place they came from. It returns no value, so the token stays out of the logs.
+ *
+ * The order:
+ * 1. A key that is already set in `env` wins.
+ * 2. Else ~/.omp/agent/athanor/client.json, when it exists. The Windows
+ *    installer writes it.
+ * 3. Else the Linux data root: $ATHANOR_DATA_ROOT, else $XDG_STATE_HOME/athanor,
+ *    else ~/.local/state/athanor. host.token holds the token, and
+ *    config/runtime.json holds hostPort and houseId (athanor-nix modules/athanor.nix).
+ *
+ * Refuses when no place holds the token or the House id.
+ */
+export function resolveHostEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   profile: string = homedir(),
-): string[] {
-  const file = path.join(profile, CLIENT_PROJECTION);
-  let source: Record<string, unknown>;
-  try {
-    source = JSON.parse(readFileSync(file, "utf8"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      log(`no client projection at ${file}; the Host keys come from the environment`);
-      return [];
-    }
-    throw new StartupRefusal(`the client projection ${file} is unreadable: ${errorText(error)}`);
+): { source: string; set: string[] } {
+  const clientFile = path.join(profile, CLIENT_PROJECTION);
+  const stateHome = text(env.XDG_STATE_HOME) || path.join(profile, ".local", "state");
+  const dataRoot = text(env.ATHANOR_DATA_ROOT) || path.join(stateHome, "athanor");
+  const tokenFile = path.join(dataRoot, "host.token");
+  const configFile = path.join(dataRoot, "config", "runtime.json");
+
+  const client = readClientProjection(clientFile);
+  const source = client ? clientFile : dataRoot;
+  const found = client ?? readDataRoot(tokenFile, configFile);
+
+  const set: string[] = [];
+  for (const [key, value] of Object.entries(found)) {
+    if (text(env[key]) || !value) continue;
+
+    env[key] = value;
+    set.push(key);
   }
+
+  const missing = REQUIRED_HOST_KEYS.filter((key) => !text(env[key]));
+
+  if (missing.length) {
+    throw new StartupRefusal(
+      `no ${missing.join(" and no ")}. The server reads the environment, then ${clientFile} when that file exists, else ${tokenFile} and ${configFile}.`,
+    );
+  }
+
+  return { source, set };
+}
+
+// client.json as Host keys, or undefined when the file does not exist.
+function readClientProjection(file: string): HostKeys | undefined {
+  const source = readJsonIfPresent(file);
+
+  if (source === undefined) return undefined;
   if (source?.format !== 2) {
     throw new StartupRefusal(`the client projection ${file} has an unsupported format`);
   }
-  const projected: string[] = [];
-  for (const [key, field] of PROJECTED_KEYS) {
-    const value = typeof source[field] === "string" ? source[field].trim() : "";
-    if (!value || String(env[key] ?? "").trim()) continue;
-    env[key] = value;
-    projected.push(key);
+
+  return Object.fromEntries(CLIENT_KEYS.map(([key, field]) => [key, text(source[field])]));
+}
+
+// The data root as Host keys. A file that does not exist holds no key.
+function readDataRoot(tokenFile: string, configFile: string): HostKeys {
+  const config = readJsonIfPresent(configFile);
+  const port = config?.hostPort;
+  const portIsValid = typeof port === "number" && Number.isInteger(port) && port >= 1 && port <= 65_535;
+
+  if (port !== undefined && !portIsValid) {
+    throw new StartupRefusal(`${configFile} has an invalid hostPort`);
   }
-  return projected;
+
+  return {
+    ATHANOR_HOST_TOKEN: text(readIfPresent(tokenFile)),
+    ATHANOR_HOST_HOUSE_ID: text(config?.houseId),
+    // runtime.json names only the port: the Host binds 127.0.0.1 (crates/athanor-install/src/app.rs).
+    ATHANOR_HOST_URL: port === undefined ? "" : `ws://127.0.0.1:${port}`,
+  };
+}
+
+// The text of the file, or undefined when the file does not exist.
+function readIfPresent(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new StartupRefusal(`${file} is unreadable: ${errorText(error)}`);
+  }
+}
+
+function readJsonIfPresent(file: string): Record<string, unknown> | undefined {
+  const source = readIfPresent(file);
+
+  if (source === undefined) return undefined;
+
+  try {
+    return JSON.parse(source);
+  } catch (error) {
+    throw new StartupRefusal(`${file} is not valid JSON: ${errorText(error)}`);
+  }
 }
 
 // The ctx each House tool reads, and nothing more:
@@ -190,10 +270,10 @@ export function readOrgans(houseDir: string): string | undefined {
   return text;
 }
 
-/** Projects the Host keys, resolves the room, and mints this process's session. */
+/** Resolves the Host keys and the room, and mints this process's session. */
 export function openHouseSession(cwd: string = process.cwd()): HouseSession {
-  const projected = projectClientEnvironment();
-  if (projected.length) log(`set ${projected.join(", ")} from the client projection`);
+  const host = resolveHostEnvironment();
+  if (host.set.length) log(`set ${host.set.join(", ")} from ${host.source}`);
   const session = `mcp-${randomUUID()}`;
   const room = resolveRoom(session, cwd);
   // OMP adopts each spirit session as its room's top-level session on

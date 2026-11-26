@@ -83,8 +83,9 @@ fn compiled_athanor_root() -> &'static Path {
         .expect("crate manifest must live at <athanor-root>/crates/akasha")
 }
 
-/// The shared cargo target directory, from `ATHANOR_BUILD_TARGET_DIR` in
-/// `.cargo/config.toml`. Since 2ebb5eb it lives outside every checkout.
+/// The cargo target directory of this build. `build.rs` derives it from
+/// `OUT_DIR`, so it follows `CARGO_TARGET_DIR`, `--target-dir`, and every
+/// cargo configuration.
 fn compiled_target_dir() -> &'static Path {
     Path::new(env!("ATHANOR_BUILD_TARGET_DIR"))
 }
@@ -169,14 +170,27 @@ mod tests {
         );
     }
 
+    /// A cargo test binary runs from the target directory of its build, so the
+    /// development fallback resolves — and resolves to the checkout's own
+    /// `state` directory, not to anything cwd-relative.
+    #[test]
+    fn development_root_is_the_compiled_checkout_state_dir() {
+        let executable = env::current_exe().expect("a test binary has a path");
+        let (root, source) = resolve_state_root_from(None, Some(&executable))
+            .expect("a cargo test binary runs from the target directory of its build");
+        assert_eq!(root, compiled_athanor_root().join("state"));
+        assert_eq!(source, StateRootSource::DevelopmentCheckout);
+        assert!(root.is_absolute());
+    }
+
     /// The opposite case, and the one this module exists for: an executable
     /// that is NOT inside the build checkout's target directory gets no
     /// fallback at all. This is the installed product, including when it runs
     /// on the very machine that built it.
     #[test]
     fn installed_executable_outside_the_build_target_requires_the_variable() {
-        // A real, canonicalizable path that is certainly not under the shared
-        // target directory: the system temp directory.
+        // A real, canonicalizable path that is certainly not under the target
+        // directory of this build: the system temp directory.
         let outside = env::temp_dir();
         assert_eq!(
             resolve_state_root_from(None, Some(&outside)).unwrap_err(),

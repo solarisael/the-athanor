@@ -13,6 +13,10 @@ members = [
     "crates/omp-keeper",
     "gui-desktop",
 ]
+# Pulse (gui-desktop) needs system libraries such as dbus-1 on Linux, and the
+# Host does not use it. Cargo commands without -p or --workspace skip it
+# (issue #83).
+default-members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"

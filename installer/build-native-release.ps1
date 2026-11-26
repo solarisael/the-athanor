@@ -120,9 +120,9 @@ Invoke-NativeReleaseStage -Name "dependency-preparation" -OutDir $Out -Action {
   Remove-StaleNativeBuildCaches $DependencyCacheRoot $DependencyCacheKey $RequiredDependencyFiles $DependencyCacheLock | Out-Null
 }
 
-# The release build lands wherever .cargo/config.toml says every build lands,
-# so a deploy reuses the dependency set the tests just compiled. Ask the pinned
-# cargo for that path rather than restating it here.
+# The release build lands in cargo's target directory, which CARGO_TARGET_DIR
+# or a machine's cargo configuration can move. Ask the pinned cargo for that
+# path rather than restating it here.
 $CargoTarget = (& $Toolchain.cargoPath metadata --format-version 1 --no-deps --locked --manifest-path (Join-Path $Root "Cargo.toml") | ConvertFrom-Json).target_directory
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($CargoTarget)) { throw "cargo metadata could not name the target directory" }
 Invoke-NativeReleaseStage -Name "cargo-build" -OutDir $Out -Action {

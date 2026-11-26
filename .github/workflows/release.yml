@@ -101,8 +101,6 @@ jobs:
           "VERSION=$version" | Out-File $env:GITHUB_ENV -Append
       - name: Test the Host, substrate, and hearth crates
         # The PostgreSQL proofs are #[ignore] and need no service here.
-        # The explicit target directory keeps .cargo/config.toml's Windows path
-        # from creating a directory named 'C:' in the checkout.
         run: cargo test --locked -p host -p akasha -p hearth --lib --tests --target-dir target/linux-x64
       - name: Build the Linux Host archive
         run: bash installer/build-linux-host-release.sh "$VERSION" dist

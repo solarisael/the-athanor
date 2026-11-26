@@ -1,17 +1,10 @@
 # Build policy for every cargo invocation in this repository.
 #
-# One target directory for the whole workstation: build, test, check, clippy,
-# and the release build in installer/build-native-release.ps1 all land here, and
-# every worktree under C:/Projects/the-athanor-dev shares it, so a fanout of
-# three worktrees compiles the dependency set once instead of three times
-# (project lesson #465). The path is absolute on purpose; a relative one is a
-# cold 15 GB tree per worktree. Another machine changes this one line.
-#
-# Payload staging lives in <checkout>/target/releases and nothing in this tree
-# is ever pruned by the deploy ritual.
-[build]
-target-dir = "C:/Projects/the-athanor-target"
-# ATHANOR_BUILD_TARGET_DIR in [env] below repeats this path; change both.
+# No target-dir: cargo builds into <checkout>/target. A machine path is
+# absolute on one platform and relative on another, and cargo resolves a
+# relative target-dir inside the checkout (issue #37). To share one target
+# directory between checkouts, set CARGO_TARGET_DIR or build.target-dir in a
+# cargo configuration outside the repository.
 
 # Incremental artifacts are per-crate, per-target and never collected; a week
 # of dev and test builds left 20 GB of them on 2026-09-02. A full recompile of
@@ -24,6 +17,3 @@ incremental = false
 # Nothing here needs test parallelism yet (Sol, 2026-09-02).
 [env]
 RUST_TEST_THREADS = "1"
-# akasha's state.rs trusts its development state root only for binaries under
-# this directory. Cargo does not expose build.target-dir to the compiler.
-ATHANOR_BUILD_TARGET_DIR = "C:/Projects/the-athanor-target"

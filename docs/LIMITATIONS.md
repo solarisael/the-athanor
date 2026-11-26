@@ -29,7 +29,7 @@ Pulse's separate proxy installation was verified on 2026-10-04.
 - `athanor` with no arguments starts the Host for every room on one port. It does not start PostgreSQL or NATS. The service manager must start them first, for example systemd (`crates/athanor-install/src/service.rs:365-418`).
 - `athanor` waits up to 90 seconds for the PostgreSQL and NATS ports. SIGINT or SIGTERM stops the Host cleanly (`crates/athanor-install/src/app.rs:163-193`).
 - `athanor start` is not ported. It expects the Windows service (`crates/athanor-install/src/cli/start.rs:132-162`).
-- The repository build directory is a Windows path (`.cargo/config.toml:13,29`). On Linux, set `CARGO_TARGET_DIR` and `ATHANOR_BUILD_TARGET_DIR` to a local directory before you build.
+- Pulse (`athanor-pulse`) is not proved on Linux. Its build needs system libraries that the Host does not use, for example `dbus-1`. Cargo commands without `-p` or `--workspace` skip it (`Cargo.toml:19`).
 - The installed OMP loader requires platform `windows-x64` and `USERPROFILE` (`adapters/omp/installed-loader.ts:376,565`). A Linux session must load `adapters/omp/index.ts` directly.
 - Fixed Windows paths remain in the Pulse launchers. The adapter no longer discovers substrate or broker processes.
 - The service, the installer, ACL hardening, and the release are Windows only. Off Windows, ACL hardening reports success and does nothing (`crates/athanor-install/src/boundaries.rs:377-380,431-435`).

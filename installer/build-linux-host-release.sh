@@ -46,9 +46,6 @@ if [ -e "$archive" ] || [ -e "$archive.sha256" ]; then
   refuse "$archive or its .sha256 already exists; use an empty OUT_DIR"
 fi
 
-# .cargo/config.toml names a Windows target directory. On Linux that path is
-# relative and creates a directory named 'C:' in the checkout, so the build
-# always passes an explicit target directory.
 target_dir="${CARGO_TARGET_DIR:-$root/target/linux-x64}"
 cargo build --manifest-path "$root/Cargo.toml" --locked --release -p host -p akasha --bins --target-dir "$target_dir"
 

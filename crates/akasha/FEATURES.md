@@ -330,7 +330,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 ### state.rs — where mutable state lives
 
 - `state_root` resolves the Athanor state root. `ATHANOR_STATE_DIR` wins and must be absolute.
-- The compile-time checkout is accepted only when the running binary sits inside that checkout's `target` directory.
+- The module accepts the compile-time checkout only when the running binary is inside the cargo target directory of its build.
 - Any other case is an error. The module never guesses a path.
 - `resolve_state_root` also returns the reason, so diagnostics can show why a path was chosen.
 - `substrate_state_dir` is the crate's own directory under the state root.

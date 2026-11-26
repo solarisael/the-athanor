@@ -1191,6 +1191,26 @@ async fn native_recall_export_is_opt_in_and_preserves_the_record_contract() {
 }
 
 #[tokio::test]
+async fn budget_telemetry_writes_a_known_diagnostic_category() {
+    let fixture = Fixture::new();
+    let request: ContextPrepareRequest =
+        serde_json::from_value(fixture.request("first").await).unwrap();
+
+    let diagnostic = telemetry::diagnostic(
+        &json!({"error":"automatic Recall exhausted its budget share"}),
+        &request,
+        None,
+        None,
+        "request_parse",
+        Some(10),
+    );
+
+    assert_eq!(diagnostic["code"], "AUTOMATIC_RECALL_BUDGET_EXHAUSTED");
+    serde_json::from_value::<protocol::DiagnosticCategory>(diagnostic["category"].clone())
+        .expect("budget telemetry category is a DiagnosticCategory");
+}
+
+#[tokio::test]
 async fn concurrent_native_exports_append_whole_records() {
     let fixture = Fixture::new();
     let mut request: ContextPrepareRequest =

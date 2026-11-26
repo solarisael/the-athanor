@@ -252,7 +252,7 @@ pub(super) fn diagnostic(
     diagnostic["next_checks"] = json!([{"action":"inspect","target":"context_session::recall::retrieve"},{"action":"retry","condition":retry}]);
     if let Some(share) = budget {
         diagnostic["code"] = json!("AUTOMATIC_RECALL_BUDGET_EXHAUSTED");
-        diagnostic["category"] = json!("budget");
+        diagnostic["category"] = json!(protocol::DiagnosticCategory::Operation);
         diagnostic["stage"] = json!("budget");
         diagnostic["budget"] = json!({"share_ms":share,"context_budget_ms":CONTEXT_BUDGET_MS});
     }

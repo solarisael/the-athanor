@@ -64,13 +64,15 @@ The complete contracts and proof limits appear in [Architecture](../../docs/ARCH
 - Recall deltas flow only after `Subscribe` returns a snapshot. Receipts and chat follow the same rule with their own subscribe commands (`server.rs:440-453`).
 - Hallway deltas reach only the socket whose session equals the target session (`server.rs:375-390,455-459`).
 - When the socket forwards a Hallway inbox projection, it stores the event's state hash as the inbox fingerprint of that session (`server.rs:378-385`).
-- A lagged recall stream sends `projection delta stream lagged; resync required`, then ends the socket (`server.rs:398-402`).
-- A lagged chat stream sends `chat delta stream lagged; resubscribe required`, then ends the socket. A lagged receipt stream ends the socket without a message (`server.rs:413,424-428`).
+- A lagged recall stream sends `projection delta stream lagged; resync required` as a recall_policy refusal, then ends the socket (`server.rs:398-402`).
+- A lagged chat stream sends `chat delta stream lagged; resubscribe required` as a chat refusal, then ends the socket. A lagged receipt stream ends the socket without a message (`server.rs:413,424-428`).
 - A binary frame gets `binary WebSocket messages are not accepted`. A ping gets a pong. A close or an error ends the socket (`server.rs:469-479`).
 
 **Commands.**
 
 - Each text frame passes JSON parse, a semantic hash, `parse_client_command`, then `validate_command` (`server.rs:525-574`).
+- A refusal from these checks uses the projection that owns the command type. The kind is `athanor.<projection>.command_refused`. Only a recall_policy refusal carries the policy state (`command_refusal`).
+- A frame without a known command type gets `athanor.command_refused` and an empty `projection_id`. Malformed JSON, a binary frame, and an unknown type get this kind.
 - The command families are listed in [Architecture](../../docs/ARCHITECTURE.md#33-the-command-socket).
 - `validate_command` checks configured House and room scope, current embodied spirit, recipient, and envelope constraints.
 - It also requires visibility `operator`, authority class `room_state`, and a non-empty sender session of at most 256 bytes (`server.rs:2567-2581`).

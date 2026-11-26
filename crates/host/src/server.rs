@@ -53,9 +53,9 @@ use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
     AkashaRecallQueryPayload, AkashaRecallResultEvent, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED,
-    CHAT_DELTA, CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED,
-    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatDraft, ChatEvent, ChatMessage, ClientCommand,
-    CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent,
+    CHAT_DELTA, CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, COMMAND_REFUSED,
+    CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatDraft, ChatEvent, ChatMessage,
+    ClientCommand, CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent,
     ConversationLogRequest, DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, Failure, FailureClass,
     HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED,
     HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID,
@@ -69,7 +69,7 @@ use protocol::{
     RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT,
     RecallParams, RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState,
     RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent, SnapshotEvent,
-    parse_client_command,
+    command_projection, parse_client_command,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -478,7 +478,7 @@ async fn handle_socket_inner(
                             "delta_stream_lagged",
                             "projection delta stream lagged; resync required",
                         );
-                        let text = diagnostic_refusal(&state, lagged).await;
+                        let text = diagnostic_refusal(&state, Some(RECALL_POLICY_PROJECTION_ID), lagged).await;
                         let _ = sink.send(Message::Text(text.into())).await;
                         return;
                     }
@@ -509,7 +509,7 @@ async fn handle_socket_inner(
                             "delta_stream_lagged",
                             "chat delta stream lagged; resubscribe required",
                         );
-                        let text = diagnostic_refusal(&state, lagged).await;
+                        let text = diagnostic_refusal(&state, Some(CHAT_PROJECTION_ID), lagged).await;
                         let _ = sink.send(Message::Text(text.into())).await;
                         return;
                     }
@@ -579,7 +579,7 @@ async fn handle_socket_inner(
                             "binary_message_unsupported",
                             "binary WebSocket messages are not accepted",
                         );
-                        let text = diagnostic_refusal(&state, binary).await;
+                        let text = diagnostic_refusal(&state, None, binary).await;
                         if sink.send(Message::Text(text.into())).await.is_err() { return; }
                     }
                     Err(_) => return,
@@ -638,17 +638,21 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 format!("malformed JSON command: {error}"),
             );
             return Responses {
-                direct: vec![diagnostic_refusal(state, failure).await],
+                direct: vec![diagnostic_refusal(state, None, failure).await],
                 delta: None,
             };
         }
     };
+    let projection = raw
+        .get("command_or_event_type")
+        .and_then(Value::as_str)
+        .and_then(command_projection);
     let command_hash = match semantic_command_hash(&raw) {
         Ok(hash) => hash,
         Err(message) => {
             let failure = Failure::new(FailureClass::InputRefused, "malformed_command", message);
             return Responses {
-                direct: vec![diagnostic_refusal(state, failure).await],
+                direct: vec![diagnostic_refusal(state, projection, failure).await],
                 delta: None,
             };
         }
@@ -656,16 +660,14 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
     let command = match parse_client_command(raw) {
         Ok(command) => command,
         Err(error) => {
-            let event = outcome_for_ids(
+            let failure = Failure::new(FailureClass::InputRefused, "invalid_command", error.reason);
+            let event = command_refusal(
                 state,
+                None,
                 &error.message_id,
                 &error.idempotency_key,
-                RECALL_POLICY_COMMAND_REFUSED,
-                Some(Failure::new(
-                    FailureClass::InputRefused,
-                    "invalid_command",
-                    error.reason,
-                )),
+                projection,
+                failure,
             )
             .await;
             return Responses {
@@ -675,11 +677,14 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
         }
     };
     if let Err(failure) = validate_command(state, &command) {
-        let event = outcome(
+        let meta = command.meta();
+        let event = command_refusal(
             state,
-            command.meta(),
-            RECALL_POLICY_COMMAND_REFUSED,
-            Some(failure),
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            projection,
+            failure,
         )
         .await;
         return Responses {
@@ -3157,12 +3162,17 @@ async fn outcome(
     outcome_with_runtime(state, meta, kind, failure, &runtime, None)
 }
 
-async fn outcome_for_ids(
+/// The refusal of a command, under the projection that owns its type. A
+/// recall_policy refusal carries the policy state, as every recall_policy
+/// outcome does; any other refusal carries the failure alone, as a chat or
+/// Presence refusal does. `None` refuses a frame that no projection owns.
+async fn command_refusal(
     state: &AppState,
+    command: Option<&CommandMeta>,
     message_id: &str,
     idempotency_key: &str,
-    kind: &str,
-    failure: Option<Failure>,
+    projection: Option<&str>,
+    failure: Failure,
 ) -> CommandOutcomeEvent {
     let fallback_id = new_id();
     let message_id = if message_id.trim().is_empty() {
@@ -3176,20 +3186,46 @@ async fn outcome_for_ids(
         idempotency_key
     };
     let runtime = state.runtime.lock().await;
+
+    if projection == Some(RECALL_POLICY_PROJECTION_ID) {
+        return CommandOutcomeEvent {
+            meta: event_meta(
+                state,
+                command,
+                message_id,
+                idempotency_key,
+                RECALL_POLICY_COMMAND_REFUSED,
+                runtime.cursor.sequence,
+                runtime.cursor.state_hash.clone(),
+                new_id(),
+            ),
+            failure: Some(failure),
+            version: runtime.cursor.version,
+            state: Some(runtime.projection.clone()),
+            decision: None,
+        };
+    }
+
+    let kind = match projection {
+        Some(projection) => format!("athanor.{projection}.command_refused"),
+        None => COMMAND_REFUSED.to_owned(),
+    };
+    let failure_hash = body_hash(&json!({ "failure": &failure })).expect("a refusal hashes");
     CommandOutcomeEvent {
-        meta: event_meta(
+        meta: event_meta_for_projection(
             state,
-            None,
+            command,
             message_id,
             idempotency_key,
-            kind,
+            &kind,
+            projection.unwrap_or_default(),
             runtime.cursor.sequence,
-            runtime.cursor.state_hash.clone(),
+            failure_hash,
             new_id(),
         ),
-        failure,
-        version: runtime.cursor.version,
-        state: Some(runtime.projection.clone()),
+        failure: Some(failure),
+        version: 0,
+        state: None,
         decision: None,
     }
 }
@@ -3220,13 +3256,18 @@ fn outcome_with_runtime(
     }
 }
 
-async fn diagnostic_refusal(state: &AppState, failure: Failure) -> String {
-    let event = outcome_for_ids(
+async fn diagnostic_refusal(
+    state: &AppState,
+    projection: Option<&str>,
+    failure: Failure,
+) -> String {
+    let event = command_refusal(
         state,
+        None,
         "unparsed-command",
         "unparsed-command",
-        RECALL_POLICY_COMMAND_REFUSED,
-        Some(failure),
+        projection,
+        failure,
     )
     .await;
     serialize(&event)
@@ -3787,6 +3828,10 @@ mod hardening_recall_atomicity;
 #[cfg(test)]
 #[path = "server/giga_capture_tests.rs"]
 mod giga_capture_tests;
+
+#[cfg(test)]
+#[path = "server/command_refusal_tests.rs"]
+mod command_refusal_tests;
 
 #[cfg(test)]
 mod tests {

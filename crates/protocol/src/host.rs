@@ -13,6 +13,8 @@ use summoning::presence::{
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
 pub const HOST_API_VERSION: u32 = 3;
+/// The refusal of a frame whose command type no projection owns.
+pub const COMMAND_REFUSED: &str = "athanor.command_refused";
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
 pub const PAPER_BOAT_RECEIPT_SUBSCRIBE: &str = "athanor.paper_boat_receipt.subscribe";
 pub const PAPER_BOAT_RECEIPT_SNAPSHOT: &str = "athanor.paper_boat_receipt.snapshot";
@@ -876,6 +878,43 @@ pub struct CommandMeta {
     pub projection_id: String,
 }
 
+/// The projection that owns a client command type. `None` means that no client
+/// command has this type.
+pub fn command_projection(command_type: &str) -> Option<&'static str> {
+    let projection = match command_type {
+        PAPER_BOAT_RECEIPT_SUBSCRIBE => PAPER_BOAT_RECEIPT_PROJECTION_ID,
+        CONTEXT_ANALYZE | CONTEXT_VIEWPORT => CONTEXT_PROJECTION_ID,
+        HALLWAY_INBOX_PROJECT | HALLWAY_KNOCK_CLAIM | HALLWAY_KNOCK_SETTLE => HALLWAY_PROJECTION_ID,
+        AKASHA_RECALL_QUERY | AKASHA_LESSON_QUERY => AKASHA_PROJECTION_ID,
+        PRESENCE_OPEN | PRESENCE_COMPILE | PRESENCE_SETTLE | PRESENCE_CLOSE => {
+            PRESENCE_PROJECTION_ID
+        }
+        ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS | SPELLBOOK_WRITE => {
+            ROUTING_PROJECTION_ID
+        }
+        LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
+        SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => SHELL_PROJECTION_ID,
+        CHAT_SUBSCRIBE | CHAT_SAY | CHAT_TURN | CHAT_DRAFT => CHAT_PROJECTION_ID,
+        ROOM_STATE => ROOM_PROJECTION_ID,
+        ORGAN_CALL => ORGAN_PROJECTION_ID,
+        JUDGMENT_RUN => JUDGMENT_PROJECTION_ID,
+        LIFECYCLE_PLAN => LIFECYCLE_PROJECTION_ID,
+        CONTEXT_PREPARE | CONTEXT_LESSON_PLAN => CONTEXT_PROJECTION_ID,
+        RECALL_POLICY_SUBSCRIBE
+        | RECALL_POLICY_RESYNC
+        | RECALL_POLICY_SET_REQUESTED_MODE
+        | RECALL_POLICY_JUDGED_MODE
+        | RECALL_POLICY_ACKNOWLEDGE
+        | RECALL_POLICY_EVALUATE
+        | RECALL_POLICY_COMPLETE_REFRESH
+        | RECALL_POLICY_FAIL_REFRESH
+        | RECALL_POLICY_INVALIDATE_AFTER_COMPACTION => RECALL_POLICY_PROJECTION_ID,
+        _ => return None,
+    };
+
+    Some(projection)
+}
+
 impl RawClientCommand {
     fn meta(&self) -> Result<CommandMeta, CommandParseError> {
         if self.schema_version != HOST_SCHEMA_VERSION {
@@ -902,32 +941,11 @@ impl RawClientCommand {
                 "idempotency_key must not be blank",
             ));
         }
-        let expected_projection = match self.command_or_event_type.as_str() {
-            PAPER_BOAT_RECEIPT_SUBSCRIBE => PAPER_BOAT_RECEIPT_PROJECTION_ID,
-            CONTEXT_ANALYZE | CONTEXT_VIEWPORT => CONTEXT_PROJECTION_ID,
-            HALLWAY_INBOX_PROJECT | HALLWAY_KNOCK_CLAIM | HALLWAY_KNOCK_SETTLE => {
-                HALLWAY_PROJECTION_ID
-            }
-            AKASHA_RECALL_QUERY | AKASHA_LESSON_QUERY => AKASHA_PROJECTION_ID,
-            PRESENCE_OPEN | PRESENCE_COMPILE | PRESENCE_SETTLE | PRESENCE_CLOSE => {
-                PRESENCE_PROJECTION_ID
-            }
-            ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS | SPELLBOOK_WRITE => {
-                ROUTING_PROJECTION_ID
-            }
-            LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
-            SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
-                SHELL_PROJECTION_ID
-            }
-            CHAT_SUBSCRIBE | CHAT_SAY | CHAT_TURN | CHAT_DRAFT => CHAT_PROJECTION_ID,
-            ROOM_STATE => ROOM_PROJECTION_ID,
-            ORGAN_CALL => ORGAN_PROJECTION_ID,
-            JUDGMENT_RUN => JUDGMENT_PROJECTION_ID,
-            LIFECYCLE_PLAN => LIFECYCLE_PROJECTION_ID,
-            CONTEXT_PREPARE | CONTEXT_LESSON_PLAN => CONTEXT_PROJECTION_ID,
-            _ => RECALL_POLICY_PROJECTION_ID,
-        };
-        if self.projection_id != expected_projection {
+        // An unknown type owns no projection to compare; the type match in
+        // `parse_client_command` refuses it by name.
+        if let Some(expected) = command_projection(&self.command_or_event_type)
+            && self.projection_id != expected
+        {
             return Err(CommandParseError::new(
                 self.message_id.clone(),
                 self.idempotency_key.clone(),

@@ -35,7 +35,10 @@ Historical source gates do not override those documents.
 Each line uses the same format as Multistock.
 No Markdown extraction, route selection, or argument construction is required.
 The agent executes these queries; the filenames alone do not start a background service.
-Keep batches below the registry's response limit.
+Keep the response of each line below 26,000 bytes.
+The shell tool of the harness removes the middle of a long response and adds no error.
+On 2026-11-25, a response of 44,137 bytes was complete and a response of 54,751 bytes was not.
+When a lesson body changes, measure the lines that contain the lesson again.
 Keep each family-and-ID pair once in a file. One lesson can be in more than one file.
 The stage is in the file name, not in the line, because `stage` is a filter of the `lessons` organ.
 

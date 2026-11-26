@@ -342,6 +342,37 @@ One port serves the whole House:
 The Start menu has **The Athanor** and **Athanor Doctor** (`athanor.iss:35-37`).
 **The Athanor** runs `athanor.exe`, which starts the Host.
 
+## The `athanor` command on Linux
+
+Linux has no installer.
+The Linux House runs the release build in its live checkout (`substrate/deploy-local.sh:122,148-151`).
+The `athanor` command is the file `target/release/athanor` in that checkout.
+The command is not on `PATH`.
+
+Run the command with its full path.
+The examples use the live checkout of the reference House, `~/Projects/the-athanor`:
+
+```sh
+~/Projects/the-athanor/target/release/athanor spirits
+```
+
+To use the short name `athanor`, put a link to the file in a folder on `PATH`:
+
+```sh
+ln -s ~/Projects/the-athanor/target/release/athanor ~/.local/bin/athanor
+```
+
+The command finds its two roots without environment variables (`crates/athanor-install/src/layout.rs:35-92`):
+
+- The program root is the folder of the command file. A symbolic link to the file does not change the program root.
+- The data root is `$XDG_STATE_HOME/athanor`. If `XDG_STATE_HOME` is not set or is not an absolute path, the data root is `$HOME/.local/state/athanor`.
+
+The systemd user unit sets `ATHANOR_PROGRAM_ROOT` and `ATHANOR_DATA_ROOT` for the Host.
+On the reference House, the unit sets the same two roots.
+If your unit sets other roots, set the same two variables before you run the command.
+Set the two variables together. The command refuses one variable without the other.
+If the command cannot find a root, the error message names the two variables.
+
 ## Move a room out of the vault
 
 Use `athanor move` to move a room from `<roomsRoot>/<room>` into the installation folder `<dataRoot>/rooms/<room>`.

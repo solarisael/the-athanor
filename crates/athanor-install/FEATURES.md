@@ -139,7 +139,7 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 
 `src/layout.rs`. Every install path in one place.
 
-- **Roots.** The program root and the data root both sit under `Solarisael/Athanor`. `ATHANOR_PROGRAM_ROOT` and `ATHANOR_DATA_ROOT` override both, only when both are set (`layout.rs:29-37`). The service ignores these overrides (`service.rs:234-240`).
+- **Roots.** On Windows, the program root and the data root sit under `Solarisael/Athanor` in `ProgramFiles` and `ProgramData` (`layout.rs:53-59`). On Linux, the program root is the folder of the running executable (`layout.rs:60,65-92`). The data root is `$XDG_STATE_HOME/athanor`, else `$HOME/.local/state/athanor`. `ATHANOR_PROGRAM_ROOT` and `ATHANOR_DATA_ROOT` override both, only when both are set (`layout.rs:48-52,61`). On Linux, a root that cannot be found gives an error that names the two variables. The service ignores these overrides (`service.rs:280-286`).
 - **Program paths.** Versions, one version, the manager binary, the loader, the current pointer, the adapter root, the adapter versions, one adapter version, and the adapter pointer.
 - **Data paths.** The runtime configuration, the secrets, the backups, the PostgreSQL data, the NATS data, the logs, the rooms, the Host state, and the legacy backup.
 - **Names.** The service name, the display name, the pointer file name, and the three legacy directory names.
@@ -175,7 +175,7 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **`keeper`.** The `omp_keeper` crate's loop for one room. The room is named one of two ways. `keeper ROOM` reads the harness registry and takes the config of the entry that answers to ROOM: its harness id, its id without the `-omp` suffix, or the last folder of its workspace, case-insensitively. A name no entry answers to is refused, and the refusal lists the rooms the registry has. `keeper --config FILE` takes the config path as written.
 - **Bare room words.** The installer never writes a room command. The operator places one `bin\<room>.cmd` per room with the body `@"%~dp0athanor.exe" keeper <room> %*`. The shim resolves the exe beside itself, so an update never leaves it stale.
 - **`chat`.** The terminal mouth for the chat projection.
-- **Installation modes.** They build the layout from `ProgramFiles` and `ProgramData`, then hand the four native seams to the installer. `--staging` and `--manifest` are required for install and update. `--external-database-file`, `--house-config-file`, and the three operator flags are optional; `--omp-config`, `--client-config`, and `--operator-principal` must arrive together.
+- **Installation modes.** They build the layout as **Roots** describes, then hand the four native seams to the installer. `--staging` and `--manifest` are required for install and update. `--external-database-file`, `--house-config-file`, and the three operator flags are optional; `--omp-config`, `--client-config`, and `--operator-principal` must arrive together.
 - **Help.** `help` lists the modes. `deploy help` shows preparation, installation, source selection, and downtime instructions.
 
 ### app

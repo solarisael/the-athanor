@@ -26,26 +26,69 @@ impl InstallLayout {
         }
     }
 
+    /// The roots of this install, for the Host and each CLI mode that reads it.
+    /// `ATHANOR_PROGRAM_ROOT` and `ATHANOR_DATA_ROOT` win when both are set.
+    /// Without them, Windows uses `ProgramFiles` and `ProgramData`. Linux uses
+    /// the folder of this executable and `$XDG_STATE_HOME/athanor`, else
+    /// `$HOME/.local/state/athanor`: the roots that the systemd unit of the
+    /// Linux House sets.
     pub fn from_environment() -> Result<Self> {
-        match (
-            std::env::var_os(PROGRAM_ROOT_ENV),
-            std::env::var_os(DATA_ROOT_ENV),
-        ) {
+        Self::resolve(
+            |name| std::env::var_os(name),
+            || std::env::current_exe().ok(),
+        )
+    }
+
+    /// The decision of [`Self::from_environment`], with the environment and
+    /// the executable path injected, so that a test changes no process state.
+    fn resolve(
+        variable: impl Fn(&str) -> Option<std::ffi::OsString>,
+        executable: impl FnOnce() -> Option<PathBuf>,
+    ) -> Result<Self> {
+        match (variable(PROGRAM_ROOT_ENV), variable(DATA_ROOT_ENV)) {
             (Some(program), Some(data)) if !program.is_empty() && !data.is_empty() => Ok(Self {
                 program: PathBuf::from(program),
                 data: PathBuf::from(data),
             }),
-            (None, None) => {
-                let program_files = PathBuf::from(
-                    std::env::var_os("ProgramFiles").context("ProgramFiles is unavailable")?,
-                );
-                let program_data = PathBuf::from(
-                    std::env::var_os("ProgramData").context("ProgramData is unavailable")?,
-                );
+            (None, None) if cfg!(windows) => {
+                let program_files =
+                    PathBuf::from(variable("ProgramFiles").context("ProgramFiles is unavailable")?);
+                let program_data =
+                    PathBuf::from(variable("ProgramData").context("ProgramData is unavailable")?);
                 Ok(Self::new(&program_files, &program_data))
             }
+            (None, None) => Self::linux_roots(variable, executable),
             _ => anyhow::bail!("{PROGRAM_ROOT_ENV} and {DATA_ROOT_ENV} must be set together"),
         }
+    }
+
+    fn linux_roots(
+        variable: impl Fn(&str) -> Option<std::ffi::OsString>,
+        executable: impl FnOnce() -> Option<PathBuf>,
+    ) -> Result<Self> {
+        let unavailable = |input: &str| {
+            format!("{input} is unavailable; set {PROGRAM_ROOT_ENV} and {DATA_ROOT_ENV}")
+        };
+        // XDG ignores a base directory that is not absolute, and so does the data root.
+        let absolute = |name: &str| {
+            variable(name)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+        };
+
+        let program = executable()
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .with_context(|| unavailable("the path of this executable"))?;
+        let state_home = absolute("XDG_STATE_HOME")
+            .or_else(|| absolute("HOME").map(|home| home.join(".local/state")))
+            .with_context(|| unavailable("HOME"))?;
+
+        Ok(Self {
+            program,
+            data: state_home.join("athanor"),
+        })
     }
 
     pub fn versions(&self) -> PathBuf {
@@ -119,4 +162,98 @@ pub fn safe_version(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
         && !value.contains("..")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    /// A process environment that holds exactly these variables.
+    fn environment(
+        variables: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<OsString> {
+        move |name| {
+            variables
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(*value))
+        }
+    }
+
+    fn executable() -> Option<PathBuf> {
+        Some(PathBuf::from("/srv/athanor/target/release/athanor"))
+    }
+
+    #[test]
+    fn explicit_roots_win_over_every_default() {
+        let layout = InstallLayout::resolve(
+            environment(&[
+                (PROGRAM_ROOT_ENV, "/opt/athanor"),
+                (DATA_ROOT_ENV, "/var/lib/athanor"),
+                ("XDG_STATE_HOME", "/home/sol/.state"),
+                ("HOME", "/home/sol"),
+                ("ProgramFiles", "C:/Program Files"),
+                ("ProgramData", "C:/ProgramData"),
+            ]),
+            executable,
+        )
+        .expect("both variables name the roots");
+
+        assert_eq!(
+            layout,
+            InstallLayout {
+                program: PathBuf::from("/opt/athanor"),
+                data: PathBuf::from("/var/lib/athanor"),
+            }
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn linux_takes_the_executable_folder_and_the_state_home() {
+        let state_home = InstallLayout::resolve(
+            environment(&[
+                ("XDG_STATE_HOME", "/home/sol/.state"),
+                ("HOME", "/home/sol"),
+            ]),
+            executable,
+        )
+        .expect("XDG_STATE_HOME names the data root");
+        let home = InstallLayout::resolve(environment(&[("HOME", "/home/sol")]), executable)
+            .expect("HOME names the data root");
+        let relative_state_home = InstallLayout::resolve(
+            environment(&[("XDG_STATE_HOME", "state"), ("HOME", "/home/sol")]),
+            executable,
+        )
+        .expect("HOME names the data root");
+
+        assert_eq!(
+            state_home,
+            InstallLayout {
+                program: PathBuf::from("/srv/athanor/target/release"),
+                data: PathBuf::from("/home/sol/.state/athanor"),
+            }
+        );
+        assert_eq!(home.data, PathBuf::from("/home/sol/.local/state/athanor"));
+        assert_eq!(relative_state_home.data, home.data);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_root_that_cannot_be_found_names_the_variables_to_set() {
+        let no_home = InstallLayout::resolve(environment(&[]), executable)
+            .unwrap_err()
+            .to_string();
+        let no_executable = InstallLayout::resolve(environment(&[("HOME", "/home/sol")]), || None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(no_home.contains("HOME"), "{no_home}");
+        for error in [no_home, no_executable] {
+            assert!(error.contains(PROGRAM_ROOT_ENV), "{error}");
+            assert!(error.contains(DATA_ROOT_ENV), "{error}");
+            assert!(!error.contains("ProgramFiles"), "{error}");
+        }
+    }
 }

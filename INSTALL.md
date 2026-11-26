@@ -113,6 +113,7 @@ An open Host makes installation wait up to ten minutes for you to stop it.
 Use `-PreparedRelease` to install a different preparation.
 Do not combine `-PreparedRelease` with preparation or Linux options.
 The Linux deployment path does not use these stages.
+[Build the Host on Linux](#build-the-host-on-linux) gives the Linux build command.
 
 ### OMP sessions during installation
 
@@ -158,6 +159,29 @@ The driver finds the receipt from the first command:
 ```powershell
 pwsh -NoProfile -File .\substrate\deploy-local.ps1
 ```
+
+## Build the Host on Linux
+
+The Linux deployment installs three binaries: `athanor`, `athanor-host`, and `athanor-substrate` (`substrate/deploy-local.sh:126`).
+Run this command from the repository root:
+
+```sh
+cargo build --locked --release \
+  -p athanor-install -p host -p akasha \
+  --bin athanor --bin athanor-host --bin athanor-substrate
+```
+
+Cargo writes the binaries to `target/release` in the checkout.
+To share one target directory between checkouts, set `CARGO_TARGET_DIR` to an absolute path.
+Cargo then writes the binaries to `$CARGO_TARGET_DIR/release`.
+
+Pulse (`athanor-pulse`) is the desktop window.
+It is not a default member of the workspace, so a plain `cargo build --release` does not build it (`Cargo.toml:19`).
+On Linux, Pulse needs system libraries that the Host does not use, for example `dbus-1`.
+To build Pulse, run `cargo build --release -p athanor-pulse`.
+
+To install the binaries, follow [Linux deploy](./docs/OPERATOR_CANON_DESIGN.md#linux-deploy).
+[Limitations § Linux today](./docs/LIMITATIONS.md#3-linux-today) lists what is not proved on Linux.
 
 ## Versions
 

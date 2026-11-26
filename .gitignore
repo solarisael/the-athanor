@@ -7,6 +7,9 @@ __pycache__/
 *.pyo
 .DS_Store
 /target/
+# Older commits set target-dir to a Windows path. On Linux, cargo resolves it
+# to this folder in the checkout (issue #37).
+/C:/
 dist/
 .venv/
 .pytest_cache/

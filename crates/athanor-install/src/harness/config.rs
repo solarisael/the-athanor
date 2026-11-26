@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn autostart_is_opt_in_and_keeps_file_order() {
-        let mut file: serde_json::Value = serde_json::from_str(KEEPER_HARNESS).unwrap();
+        let mut file: serde_json::Value = serde_json::from_str(&keeper_harness()).unwrap();
         let entry = file["harnesses"][0].clone();
         file["harnesses"] = serde_json::json!([
             { "harnessId": "z-first", "autoStart": true },
@@ -309,36 +309,57 @@ mod tests {
         let registry = HarnessRegistry::parse(&file.to_string()).unwrap();
         assert_eq!(registry.auto_start_ids(), &["z-first", "a-last"]);
         assert!(
-            HarnessRegistry::parse(KEEPER_HARNESS)
+            HarnessRegistry::parse(&keeper_harness())
                 .unwrap()
                 .auto_start_ids()
                 .is_empty()
         );
     }
 
+    /// The root of every fixture path. `HarnessRegistry::parse` refuses a
+    /// program or workspace that is not absolute, and `C:/` is absolute only
+    /// on Windows.
+    #[cfg(windows)]
+    const ROOT: &str = "C:/";
+    #[cfg(not(windows))]
+    const ROOT: &str = "/";
+
+    fn absolute(path: &str) -> String {
+        format!("{ROOT}{path}")
+    }
+
     /// A room's keeper is the one exe in keeper mode: `athanor.exe` is the
     /// program, and the mode plus its config file are the arguments.
-    const KEEPER_HARNESS: &str = r#"{
+    fn keeper_harness() -> String {
+        let program = absolute("Program Files/Solarisael/Athanor/bin/athanor.exe");
+        let config = absolute("Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json");
+        let workspace = absolute("Solarisael/Obsidian/obsidian/kintsu");
+
+        format!(
+            r#"{{
         "format": 1,
         "harnesses": [
-            {
+            {{
                 "harnessId": "kintsu-omp",
                 "label": "Kintsu OMP",
-                "program": "C:/Program Files/Solarisael/Athanor/bin/athanor.exe",
+                "program": "{program}",
                 "arguments": [
                     "keeper",
                     "--config",
-                    "C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
+                    "{config}"
                 ],
-                "workspace": "C:/Solarisael/Obsidian/obsidian/kintsu",
+                "workspace": "{workspace}",
                 "console": "new_window"
-            }
+            }}
         ]
-    }"#;
+    }}"#
+        )
+    }
 
     #[test]
     fn the_keeper_resolves_as_an_ordinary_process_harness() {
-        let registry = HarnessRegistry::parse(KEEPER_HARNESS).expect("the keeper entry resolves");
+        let registry =
+            HarnessRegistry::parse(&keeper_harness()).expect("the keeper entry resolves");
         assert_eq!(registry.len(), 1);
         let spec = registry.get("kintsu-omp").expect("the entry is registered");
         assert_eq!(spec.label, "Kintsu OMP");
@@ -350,9 +371,9 @@ mod tests {
         assert_eq!(
             spec.launch.arguments,
             [
-                "keeper",
-                "--config",
-                "C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
+                "keeper".to_string(),
+                "--config".to_string(),
+                absolute("Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json")
             ],
             "the arguments reach the keeper mode as written"
         );
@@ -361,7 +382,7 @@ mod tests {
 
     #[test]
     fn a_declared_omp_driver_is_refused_and_names_the_keeper() {
-        let text = KEEPER_HARNESS.replace(
+        let text = keeper_harness().replace(
             "\"label\": \"Kintsu OMP\",",
             "\"label\": \"Kintsu OMP\",\n                \"driver\": \"omp\",",
         );
@@ -382,12 +403,12 @@ mod tests {
     /// Two rooms plus a harness that is not a keeper, as a House registry
     /// has them; the Kodo config is relative so the workspace join is proven.
     fn two_rooms() -> HarnessRegistry {
-        let mut file: serde_json::Value = serde_json::from_str(KEEPER_HARNESS).unwrap();
+        let mut file: serde_json::Value = serde_json::from_str(&keeper_harness()).unwrap();
         let kintsu = file["harnesses"][0].clone();
         let mut kodo = kintsu.clone();
         kodo["harnessId"] = "kodo-omp".into();
         kodo["label"] = "Kodo OMP".into();
-        kodo["workspace"] = "C:/Solarisael/Obsidian/obsidian/kodo".into();
+        kodo["workspace"] = absolute("Solarisael/Obsidian/obsidian/kodo").into();
         kodo["arguments"] =
             serde_json::json!(["keeper", "--config", ".omp/runtime/omp-keeper.json"]);
         let mut other = kintsu.clone();
@@ -400,8 +421,9 @@ mod tests {
     #[test]
     fn a_room_opens_by_folder_name_id_or_id_stem() {
         let registry = two_rooms();
-        let kodo =
-            PathBuf::from("C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/omp-keeper.json");
+        let kodo = PathBuf::from(absolute(
+            "Solarisael/Obsidian/obsidian/kodo/.omp/runtime/omp-keeper.json",
+        ));
         for name in ["kodo", "Kodo", "kodo-omp", "KODO-OMP"] {
             assert_eq!(
                 registry.keeper_config_for_room(name).unwrap(),
@@ -411,7 +433,9 @@ mod tests {
         }
         assert_eq!(
             registry.keeper_config_for_room("kintsu").unwrap(),
-            PathBuf::from("C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json")
+            PathBuf::from(absolute(
+                "Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
+            ))
         );
     }
 

@@ -24,7 +24,7 @@ import {
   openSurfaceDoor,
   overBoatLine,
 } from "./boat-door.ts";
-import { hostCommand, sendHostCommand, HostRefused, HostUnavailable, type HostBinding } from "./host.ts";
+import { hostCommand, sendHostCommand, HostRefused, HostUnavailable, type FailureClass, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { conversationText } from "./text.ts";
 import { generatedTurnKey } from "./turn-origin.ts";
@@ -93,6 +93,8 @@ type ChatDoormanState = {
   reporting: boolean;
   stopped: boolean;
   lastWarningAt: number;
+  // The code of the last tick refusal told while the doorman keeps asking.
+  lastRefusal: string | null;
 };
 
 const chatDoormen = new Map<string, ChatDoormanState>();
@@ -108,8 +110,8 @@ function warn(state: ChatDoormanState, message: string): void {
   console.warn(`[athanor] Chat doorman degraded: ${message}`);
 }
 
-// A refusal is the Host's answer, and asking again does not change it. Each
-// caller stops asking before it warns, so a refusal is told once, with no cooldown.
+// A refusal is the Host's answer, not degradation. Each caller tells it once: it
+// stops asking, or it warns only for a new code. So no cooldown applies.
 function warnRefused(refusal: HostRefused, consequence: string): void {
   console.warn(`[athanor] Chat doorman ${consequence}: the Host refused (${refusal.code}): ${refusal.message}`);
 }
@@ -150,6 +152,8 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
       state.binding,
       { action: "chatNext", ...(instanceId ? { instanceId } : {}) },
     );
+    // The Host answered, so a later refusal is a new one and warns again.
+    state.lastRefusal = null;
     // The snapshot request yields: the session may have started another turn
     // or been retired while the Host was answering.
     if (state.stopped || topLevelSession(state.binding.room) !== state.binding.session) return;
@@ -182,19 +186,33 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     state.pi.sendMessage(sayMessage(next), { deliverAs: "nextTurn", triggerTurn: true });
   } catch (error) {
     if (error instanceof HostRefused) {
-      // Every poll would meet the same refusal, so the doorman stops. The next
-      // turn or session start makes a new doorman. A doorman stopped while it
-      // waited may already have that successor under its key.
-      if (!state.stopped) {
-        stopChatDoorman(state.binding);
-        warnRefused(error, "stopped until the next turn");
-      }
+      // A doorman stopped while it waited may already have a successor under its key.
+      if (!state.stopped) refuseTick(state, error);
     } else if (!(error instanceof HostUnavailable)) {
       warn(state, error instanceof Error ? error.message : String(error));
     }
   } finally {
     state.ticking = false;
   }
+}
+
+// The class decides the reaction (host.ts). Every poll sends the same call, so
+// a refused call (`input_refused`) or binding (`not_permitted`) stops the
+// doorman; the next turn or session start makes a new one with a fresh binding.
+// Any other refusal can clear while the call stays the same (the room state
+// file reads again, a command goes fresh), so the doorman keeps asking.
+const STOPPING_REFUSALS = new Set<FailureClass>(["input_refused", "not_permitted"]);
+
+function refuseTick(state: ChatDoormanState, refusal: HostRefused): void {
+  if (STOPPING_REFUSALS.has(refusal.failure.class)) {
+    stopChatDoorman(state.binding);
+    warnRefused(refusal, "stopped until the next turn");
+    return;
+  }
+  if (state.lastRefusal === refusal.code) return;
+
+  state.lastRefusal = refusal.code;
+  warnRefused(refusal, "asks again at the next poll");
 }
 
 export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void {
@@ -219,6 +237,7 @@ export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void 
     reporting: false,
     stopped: false,
     lastWarningAt: 0,
+    lastRefusal: null,
   };
   state.timer = ctx.setInterval(() => tickChatDoorman(state), CHAT_POLL_MS);
   chatDoormen.set(key, state);

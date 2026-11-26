@@ -19,18 +19,25 @@ const HOST_FAILURE = { class: "input_refused", code: "invalid_request", message:
 const ORGAN_FAILURE = { class: "conflict", code: "knock_state_conflict", message: "the knock was already claimed", hops: [HOP] };
 const CONFLICT = { code: "revision_conflict", message: "the document changed since it was read", currentRevision: "sha256:feed" };
 const CHAT = { room: "probe", spirit: "Probe", session: "probe-session" };
+// Tick refusals from the Host's command checks (crates/host/src/server.rs, validate_command).
+const FOREIGN_BINDING = { class: "not_permitted", code: "foreign_binding", message: "command binding is foreign", hops: [HOP] };
+const ROOM_STATE_UNREADABLE = { class: "configuration", code: "room_state_unavailable", message: "cannot read room state", hops: [HOP] };
+const COMMAND_EXPIRED = { class: "deadline", code: "command_expired", message: "command has expired", hops: [HOP] };
 
 let directory = "";
 let saved: Record<string, string | undefined> = {};
 let server: ReturnType<typeof Bun.serve>;
 let commands: Array<Record<string, any>> = [];
-// The say the Host hands to chatNext. With none, chatNext is refused like every other command.
+// The failure every command except an organ call gets.
+let hostFailure: Record<string, unknown> = HOST_FAILURE;
+// The say the Host hands to chatNext. With none, chatNext gets hostFailure.
 let offeredSay: Record<string, unknown> | null = null;
 let warnings: ReturnType<typeof spyOn>;
 
 beforeEach(() => {
   __sessionTest.reset();
   commands = [];
+  hostFailure = HOST_FAILURE;
   offeredSay = null;
   warnings = spyOn(console, "warn").mockImplementation(() => {});
   directory = mkdtempSync(path.join(tmpdir(), "host-refusal-shapes-"));
@@ -61,7 +68,7 @@ beforeEach(() => {
         socket.send(JSON.stringify({
           correlation_id: request.message_id,
           command_or_event_type: organ ? "athanor.organ.result" : `athanor.${request.projection_id}.command_failed`,
-          failure: organ ? ORGAN_FAILURE : HOST_FAILURE,
+          failure: organ ? ORGAN_FAILURE : hostFailure,
         }));
       },
     },
@@ -188,20 +195,44 @@ test("recall_policy with no Host to answer is degraded and keeps its code", asyn
   expect(result.details.code).toBe("recall_policy_host_unavailable");
 });
 
-test("a refused doorman tick warns once and asks no more until a new doorman starts", async () => {
+test("a doorman tick refused as a wrong call or binding stops it after one warning; a new doorman asks again", async () => {
   registerTopLevelSession(CHAT.room, CHAT.session);
-  const doorman = chatDoorman();
+  const wrongCall = chatDoorman();
 
-  await doorman.poll();
-  await doorman.poll();
+  await wrongCall.poll();
+  await wrongCall.poll();
 
   expect(sent("athanor.lifecycle.plan")).toHaveLength(1);
   expect(chatWarnings()).toEqual([expect.stringContaining("stopped until the next turn: the Host refused (invalid_request)")]);
 
-  await chatDoorman().poll();
+  hostFailure = FOREIGN_BINDING;
+  const wrongBinding = chatDoorman();
+  await wrongBinding.poll();
+  await wrongBinding.poll();
 
   expect(sent("athanor.lifecycle.plan")).toHaveLength(2);
   expect(chatWarnings()).toHaveLength(2);
+  expect(chatWarnings()[1]).toContain("stopped until the next turn: the Host refused (foreign_binding)");
+});
+
+test("a doorman tick refusal that can clear keeps it asking, warns once per code, and the next answer delivers the say", async () => {
+  registerTopLevelSession(CHAT.room, CHAT.session);
+  const doorman = chatDoorman();
+
+  hostFailure = ROOM_STATE_UNREADABLE;
+  await doorman.poll();
+  await doorman.poll();
+  hostFailure = COMMAND_EXPIRED;
+  await doorman.poll();
+  offeredSay = { author: "operator", authorName: "Sol", turnId: "say-1", sequence: 1, text: "are you there?" };
+  await doorman.poll();
+
+  expect(sent("athanor.lifecycle.plan")).toHaveLength(4);
+  expect(doorman.says.map((say) => say.details.sayId)).toEqual(["say-1"]);
+  expect(chatWarnings()).toEqual([
+    expect.stringContaining("asks again at the next poll: the Host refused (room_state_unavailable)"),
+    expect.stringContaining("asks again at the next poll: the Host refused (command_expired)"),
+  ]);
 });
 
 test("a refused chat draft warns once, and its say sends no more drafts", async () => {

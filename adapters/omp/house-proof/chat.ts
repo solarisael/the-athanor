@@ -24,7 +24,7 @@ import {
   openSurfaceDoor,
   overBoatLine,
 } from "./boat-door.ts";
-import { hostCommand, sendHostCommand, HostUnavailable, type HostBinding } from "./host.ts";
+import { hostCommand, sendHostCommand, HostRefused, HostUnavailable, type FailureClass, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { conversationText } from "./text.ts";
 import { generatedTurnKey } from "./turn-origin.ts";
@@ -63,6 +63,7 @@ type ChatDraft = {
   reports: number;
   dirty: boolean;
   flushing: boolean;
+  refused: boolean;
   timer: ReturnType<typeof setTimeout> | null;
 };
 
@@ -92,6 +93,8 @@ type ChatDoormanState = {
   reporting: boolean;
   stopped: boolean;
   lastWarningAt: number;
+  // The code of the last tick refusal told while the doorman keeps asking.
+  lastRefusal: string | null;
 };
 
 const chatDoormen = new Map<string, ChatDoormanState>();
@@ -105,6 +108,12 @@ function warn(state: ChatDoormanState, message: string): void {
   if (now - state.lastWarningAt < CHAT_WARNING_COOLDOWN_MS) return;
   state.lastWarningAt = now;
   console.warn(`[athanor] Chat doorman degraded: ${message}`);
+}
+
+// A refusal is the Host's answer, not degradation. Each caller tells it once: it
+// stops asking, or it warns only for a new code. So no cooldown applies.
+function warnRefused(refusal: HostRefused, consequence: string): void {
+  console.warn(`[athanor] Chat doorman ${consequence}: the Host refused (${refusal.code}): ${refusal.message}`);
 }
 
 function sayMessage(line: ChatLine): Record<string, unknown> {
@@ -143,6 +152,8 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
       state.binding,
       { action: "chatNext", ...(instanceId ? { instanceId } : {}) },
     );
+    // The Host answered, so a later refusal is a new one and warns again.
+    state.lastRefusal = null;
     // The snapshot request yields: the session may have started another turn
     // or been retired while the Host was answering.
     if (state.stopped || topLevelSession(state.binding.room) !== state.binding.session) return;
@@ -156,7 +167,7 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
     if (boatDoorOpen()) return;
     state.pendingSayId = next.turnId;
-    state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, timer: null };
+    state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, refused: false, timer: null };
 
     if (command || nearLimit) {
       const opened = openSurfaceDoor(state.ctx, {
@@ -174,12 +185,34 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     }
     state.pi.sendMessage(sayMessage(next), { deliverAs: "nextTurn", triggerTurn: true });
   } catch (error) {
-    if (!(error instanceof HostUnavailable)) {
+    if (error instanceof HostRefused) {
+      // A doorman stopped while it waited may already have a successor under its key.
+      if (!state.stopped) refuseTick(state, error);
+    } else if (!(error instanceof HostUnavailable)) {
       warn(state, error instanceof Error ? error.message : String(error));
     }
   } finally {
     state.ticking = false;
   }
+}
+
+// The class decides the reaction (host.ts). Every poll sends the same call, so
+// a refused call (`input_refused`) or binding (`not_permitted`) stops the
+// doorman; the next turn or session start makes a new one with a fresh binding.
+// Any other refusal can clear while the call stays the same (the room state
+// file reads again, a command goes fresh), so the doorman keeps asking.
+const STOPPING_REFUSALS = new Set<FailureClass>(["input_refused", "not_permitted"]);
+
+function refuseTick(state: ChatDoormanState, refusal: HostRefused): void {
+  if (STOPPING_REFUSALS.has(refusal.failure.class)) {
+    stopChatDoorman(state.binding);
+    warnRefused(refusal, "stopped until the next turn");
+    return;
+  }
+  if (state.lastRefusal === refusal.code) return;
+
+  state.lastRefusal = refusal.code;
+  warnRefused(refusal, "asks again at the next poll");
 }
 
 export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void {
@@ -204,6 +237,7 @@ export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void 
     reporting: false,
     stopped: false,
     lastWarningAt: 0,
+    lastRefusal: null,
   };
   state.timer = ctx.setInterval(() => tickChatDoorman(state), CHAT_POLL_MS);
   chatDoormen.set(key, state);
@@ -318,7 +352,7 @@ function clearDraftTimer(state: ChatDoormanState): void {
 
 function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
   const draft = state.draft;
-  if (!draft || state.settledReport || state.stopped) return;
+  if (!draft || draft.refused || state.settledReport || state.stopped) return;
   draft.dirty = true;
   if (draft.timer) return;
   draft.timer = setTimeout(() => {
@@ -330,7 +364,7 @@ function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
 async function flushDraft(state: ChatDoormanState): Promise<void> {
   const draft = state.draft;
   const sayId = state.pendingSayId;
-  if (!draft || !sayId || draft.flushing || state.settledReport || state.stopped) return;
+  if (!draft || !sayId || draft.flushing || draft.refused || state.settledReport || state.stopped) return;
   draft.flushing = true;
   draft.dirty = false;
   draft.reports += 1;
@@ -355,7 +389,11 @@ async function flushDraft(state: ChatDoormanState): Promise<void> {
       ACCEPTED,
     );
   } catch (error) {
-    if (!(error instanceof HostUnavailable)) {
+    if (error instanceof HostRefused) {
+      // Every later draft of this say would meet the same refusal.
+      draft.refused = true;
+      warnRefused(error, `sends no more drafts for say ${sayId}`);
+    } else if (!(error instanceof HostUnavailable)) {
       warn(state, error instanceof Error ? error.message : String(error));
     }
   } finally {
